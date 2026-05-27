@@ -448,7 +448,7 @@ else:
                 _r,
                 key=f"_ratio_{_r}",
                 type="primary" if st.session_state.ratio == _r else "secondary",
-                width="stretch",
+                use_container_width=True,
             ):
                 st.session_state.ratio = _r
                 st.rerun()
@@ -469,7 +469,7 @@ else:
     col1, col2 = st.columns(2, gap="large")
     with col1:
         st.markdown("<div class='col-label'>Before</div>", unsafe_allow_html=True)
-        st.image(_before, width="stretch")
+        st.image(_before, use_container_width=True)
     with col2:
         _dl_name = f"cj_listing_{st.session_state.ratio.replace(':','x')}.png"
         st.markdown("<div class='col-label'>After</div>", unsafe_allow_html=True)
