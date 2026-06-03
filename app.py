@@ -117,6 +117,55 @@ st.markdown(
     border-top: 1px solid #e8e8e4;
     margin: 1.5rem 0;
   }}
+  /* ── Navigation pill tabs ──────────────────────────────────────────── */
+  /* Center the tab bar */
+  div[data-testid="stTabs"] > div:first-child {{
+    display: flex !important;
+    justify-content: center !important;
+    margin-bottom: 0.8rem !important;
+  }}
+  /* Pill container */
+  div[data-testid="stTabBar"] {{
+    background: white !important;
+    border-radius: 999px !important;
+    padding: 5px !important;
+    gap: 4px !important;
+    border: none !important;
+    box-shadow: 0 2px 14px rgba(0,0,0,0.07) !important;
+    overflow: visible !important;
+    width: auto !important;
+    min-width: 0 !important;
+  }}
+  /* Each tab button */
+  button[data-baseweb="tab"] {{
+    background: transparent !important;
+    color: #888 !important;
+    border-radius: 999px !important;
+    padding: 9px 30px !important;
+    font-weight: 700 !important;
+    font-size: 0.88rem !important;
+    border: none !important;
+    margin: 0 !important;
+    transition: background 0.15s, color 0.15s !important;
+    white-space: nowrap !important;
+  }}
+  button[data-baseweb="tab"][aria-selected="true"] {{
+    background: {PRIMARY} !important;
+    color: #006633 !important;
+  }}
+  button[data-baseweb="tab"][aria-selected="false"]:hover {{
+    background: rgba(0,0,0,0.04) !important;
+    color: #444 !important;
+  }}
+  /* Hide underline / border */
+  div[data-baseweb="tab-highlight"],
+  div[data-baseweb="tab-border"] {{
+    display: none !important;
+  }}
+  /* Tab panel top padding */
+  div[data-testid="stTabPanel"] {{
+    padding-top: 1.2rem !important;
+  }}
 </style>
 """,
     unsafe_allow_html=True,
@@ -392,133 +441,164 @@ for _k in ("original", "result", "warn"):
 if "ratio" not in st.session_state:
     st.session_state.ratio = "1:1"
 
-# ── UI ─────────────────────────────────────────────────────────────────────────
-st.markdown(
-    f"<h2 style='color:{DARK};margin:0 0 1.4rem;font-size:1.85rem;font-weight:700;'>"
-    "CJ Listing Formatter</h2>",
-    unsafe_allow_html=True,
-)
+# ── Navigation tabs ────────────────────────────────────────────────────────────
+_tab_listing, _tab_social = st.tabs(["Item Listing", "Social Post"])
 
-# ── upload screen ──────────────────────────────────────────────────────────────
-if st.session_state.result is None:
-    uploaded = st.file_uploader(
-        "Drop photo here",
-        type=["jpg", "jpeg", "png", "webp"],
-        label_visibility="collapsed",
-    )
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1 · Item Listing (CJ Formatter)
+# ══════════════════════════════════════════════════════════════════════════════
+with _tab_listing:
     st.markdown(
-        "<p style='text-align:center;color:#bbb;font-size:0.78rem;margin-top:-0.3rem;'>"
-        "JPG · PNG · WEBP · up to 200 MB</p>",
+        f"<h2 style='color:{DARK};margin:0 0 1.4rem;font-size:1.85rem;font-weight:700;'>"
+        "CJ Listing Formatter</h2>",
         unsafe_allow_html=True,
     )
 
-    if st.session_state.warn:
+    # ── upload screen ──────────────────────────────────────────────────────────
+    if st.session_state.result is None:
+        uploaded = st.file_uploader(
+            "Drop photo here",
+            type=["jpg", "jpeg", "png", "webp"],
+            label_visibility="collapsed",
+        )
         st.markdown(
-            f"<div class='warn-box'>&#9888; {st.session_state.warn}</div>",
+            "<p style='text-align:center;color:#bbb;font-size:0.78rem;margin-top:-0.3rem;'>"
+            "JPG · PNG · WEBP · up to 200 MB</p>",
             unsafe_allow_html=True,
         )
 
-    if uploaded is not None:
-        pil_img = ImageOps.exif_transpose(Image.open(uploaded))
-        with st.spinner("Processing…"):
-            result, warn = make_listing(pil_img)
-
-        if warn:
-            st.session_state.warn = warn
-            st.rerun()
-        else:
-            st.session_state.original = pil_img
-            st.session_state.result = result
-            st.session_state.warn = None
-            st.rerun()
-
-# ── result screen ──────────────────────────────────────────────────────────────
-else:
-    # ── Ratio selector ────────────────────────────────────────────────────────
-    st.markdown(
-        "<p style='font-size:0.72rem;font-weight:700;letter-spacing:0.08em;"
-        "text-transform:uppercase;color:#aaa;margin-bottom:0.3rem;'>Output ratio</p>",
-        unsafe_allow_html=True,
-    )
-    _RATIO_OPTS = [("1:1", "eBay"), ("4:3", "Website"), ("4:5", "Instagram")]
-    _ratio_cols = st.columns(3)
-    for _i, (_r, _hint) in enumerate(_RATIO_OPTS):
-        with _ratio_cols[_i]:
-            if st.button(
-                _r,
-                key=f"_ratio_{_r}",
-                type="primary" if st.session_state.ratio == _r else "secondary",
-                use_container_width=True,
-            ):
-                st.session_state.ratio = _r
-                st.rerun()
+        if st.session_state.warn:
             st.markdown(
-                f"<p style='text-align:center;color:#bbb;font-size:0.72rem;"
-                f"margin-top:-0.5rem;'>{_hint}</p>",
+                f"<div class='warn-box'>&#9888; {st.session_state.warn}</div>",
                 unsafe_allow_html=True,
             )
-    st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
 
-    _before = _crop_before(st.session_state.original, st.session_state.ratio)
-    _after  = _crop_result(st.session_state.result,   st.session_state.ratio)
+        if uploaded is not None:
+            pil_img = ImageOps.exif_transpose(Image.open(uploaded))
+            with st.spinner("Processing…"):
+                result, warn = make_listing(pil_img)
 
-    _png_bytes = _to_png_bytes(_after)
-    _b64 = base64.b64encode(_png_bytes).decode()
-    _data_url = f"data:image/png;base64,{_b64}"
+            if warn:
+                st.session_state.warn = warn
+                st.rerun()
+            else:
+                st.session_state.original = pil_img
+                st.session_state.result = result
+                st.session_state.warn = None
+                st.rerun()
 
-    col1, col2 = st.columns(2, gap="large")
-    with col1:
-        st.markdown("<div class='col-label'>Before</div>", unsafe_allow_html=True)
-        st.image(_before, use_container_width=True)
-    with col2:
-        _dl_name = f"cj_listing_{st.session_state.ratio.replace(':','x')}.png"
-        st.markdown("<div class='col-label'>After</div>", unsafe_allow_html=True)
+    # ── result screen ──────────────────────────────────────────────────────────
+    else:
+        # ── Ratio selector ──────────────────────────────────────────────────
         st.markdown(
-            f"""<div class="cj-after" id="cj-wrap">
-              <img id="cj-thumb" src="{_data_url}"
-                   style="width:100%;border-radius:8px;display:block;cursor:zoom-in;" />
-              <button id="cj-expand" class="cj-expand-btn">
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="#555555">
-                  <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
-                </svg>
-              </button>
-            </div>
-            <div id="cj-lb">
-              <img id="cj-lb-img" src="{_data_url}" />
-              <a class="cj-lb-dl" id="cj-lb-dl" href="{_data_url}"
-                 download="{_dl_name}">↓ Download</a>
-            </div>
-            <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
-                 style="display:none"
-                 onload="(function(){{
-                   var t=document.getElementById('cj-thumb'),
-                       b=document.getElementById('cj-expand'),
-                       lb=document.getElementById('cj-lb'),
-                       im=document.getElementById('cj-lb-img'),
-                       dl=document.getElementById('cj-lb-dl');
-                   function op(){{lb.style.display='flex';}}
-                   function cl(){{lb.style.display='none';}}
-                   if(t)t.addEventListener('click',op);
-                   if(b)b.addEventListener('click',function(e){{e.stopPropagation();op();}});
-                   if(lb)lb.addEventListener('click',function(e){{if(e.target===lb)cl();}});
-                   if(im)im.addEventListener('click',function(e){{e.stopPropagation();}});
-                   if(dl)dl.addEventListener('click',function(e){{e.stopPropagation();}});
-                 }})();" />""",
+            "<p style='font-size:0.72rem;font-weight:700;letter-spacing:0.08em;"
+            "text-transform:uppercase;color:#aaa;margin-bottom:0.3rem;'>Output ratio</p>",
             unsafe_allow_html=True,
         )
+        _RATIO_OPTS = [("1:1", "eBay"), ("4:3", "Website"), ("4:5", "Instagram")]
+        _ratio_cols = st.columns(3)
+        for _i, (_r, _hint) in enumerate(_RATIO_OPTS):
+            with _ratio_cols[_i]:
+                if st.button(
+                    _r,
+                    key=f"_ratio_{_r}",
+                    type="primary" if st.session_state.ratio == _r else "secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state.ratio = _r
+                    st.rerun()
+                st.markdown(
+                    f"<p style='text-align:center;color:#bbb;font-size:0.72rem;"
+                    f"margin-top:-0.5rem;'>{_hint}</p>",
+                    unsafe_allow_html=True,
+                )
+        st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
 
-    st.markdown("<div style='margin-top:1.5rem;'>", unsafe_allow_html=True)
-    _, btn_dl, btn_try, _ = st.columns([2.5, 1.2, 1.5, 2.5])
-    with btn_dl:
-        st.download_button(
-            "↓  Download",
-            data=_png_bytes,
-            file_name=f"cj_listing_{st.session_state.ratio.replace(':','x')}.png",
-            mime="image/png",
-        )
-    with btn_try:
-        if st.button("↺  Try another photo"):
-            st.session_state.original = None
-            st.session_state.result = None
-            st.session_state.warn = None
-            st.rerun()
+        _before = _crop_before(st.session_state.original, st.session_state.ratio)
+        _after  = _crop_result(st.session_state.result,   st.session_state.ratio)
+
+        _png_bytes = _to_png_bytes(_after)
+        _b64 = base64.b64encode(_png_bytes).decode()
+        _data_url = f"data:image/png;base64,{_b64}"
+
+        col1, col2 = st.columns(2, gap="large")
+        with col1:
+            st.markdown("<div class='col-label'>Before</div>", unsafe_allow_html=True)
+            st.image(_before, use_container_width=True)
+        with col2:
+            _dl_name = f"cj_listing_{st.session_state.ratio.replace(':','x')}.png"
+            st.markdown("<div class='col-label'>After</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"""<div class="cj-after" id="cj-wrap">
+                  <img id="cj-thumb" src="{_data_url}"
+                       style="width:100%;border-radius:8px;display:block;cursor:zoom-in;" />
+                  <button id="cj-expand" class="cj-expand-btn">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="#555555">
+                      <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+                    </svg>
+                  </button>
+                </div>
+                <div id="cj-lb">
+                  <img id="cj-lb-img" src="{_data_url}" />
+                  <a class="cj-lb-dl" id="cj-lb-dl" href="{_data_url}"
+                     download="{_dl_name}">↓ Download</a>
+                </div>
+                <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
+                     style="display:none"
+                     onload="(function(){{
+                       var t=document.getElementById('cj-thumb'),
+                           b=document.getElementById('cj-expand'),
+                           lb=document.getElementById('cj-lb'),
+                           im=document.getElementById('cj-lb-img'),
+                           dl=document.getElementById('cj-lb-dl');
+                       function op(){{lb.style.display='flex';}}
+                       function cl(){{lb.style.display='none';}}
+                       if(t)t.addEventListener('click',op);
+                       if(b)b.addEventListener('click',function(e){{e.stopPropagation();op();}});
+                       if(lb)lb.addEventListener('click',function(e){{if(e.target===lb)cl();}});
+                       if(im)im.addEventListener('click',function(e){{e.stopPropagation();}});
+                       if(dl)dl.addEventListener('click',function(e){{e.stopPropagation();}});
+                     }})();" />""",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("<div style='margin-top:1.5rem;'>", unsafe_allow_html=True)
+        _, btn_dl, btn_try, _ = st.columns([2.5, 1.2, 1.5, 2.5])
+        with btn_dl:
+            st.download_button(
+                "↓  Download",
+                data=_png_bytes,
+                file_name=f"cj_listing_{st.session_state.ratio.replace(':','x')}.png",
+                mime="image/png",
+            )
+        with btn_try:
+            if st.button("↺  Try another photo"):
+                st.session_state.original = None
+                st.session_state.result = None
+                st.session_state.warn = None
+                st.rerun()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 · Social Post (IAAC Identity Tool)
+# ══════════════════════════════════════════════════════════════════════════════
+with _tab_social:
+    # The IAAC tool is a WebGL/JS app served from Streamlit's static file
+    # serving at /app/static/iaac/index.html.  We use JS to set the iframe src
+    # dynamically so the URL is correct both locally and on Streamlit Cloud.
+    st.markdown(
+        """
+        <iframe id="iaac-frame"
+          style="width:100%;height:900px;border:none;border-radius:8px;display:block;"
+          allow="camera; microphone; clipboard-write; downloads"
+          allowfullscreen></iframe>
+        <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
+             style="display:none"
+             onload="(function(){
+               var f = document.getElementById('iaac-frame');
+               if(f && !f.src) {
+                 f.src = window.location.origin + '/app/static/iaac/index.html';
+               }
+             })();" />
+        """,
+        unsafe_allow_html=True,
+    )
