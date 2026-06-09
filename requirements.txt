@@ -18,3 +18,16 @@ scikit-image>=0.21.0       # image utilities used by rembg
 scipy>=1.11.0              # rembg mask post-processing
 pooch>=1.8.0               # model file download + hash verification
 tqdm>=4.65.0               # download progress (shown on first model fetch)
+
+# IC-Light relighting (left-side studio light)
+# Pin to versions tested with IC-Light; diffusers 0.28+ changes the pipeline API.
+# For Apple Silicon: PyTorch MPS backend is used automatically (float32).
+# For NVIDIA GPU:    install torch with CUDA and set CJ_REMBG_MODEL=birefnet-general.
+diffusers==0.27.2
+transformers==4.36.2
+safetensors>=0.4.2
+einops>=0.7.0
+# torch and torchvision are intentionally unpinned — install the variant matching
+# your hardware (CPU / CUDA / MPS) from https://pytorch.org/get-started/locally/
+torch>=2.1.0
+torchvision>=0.16.0

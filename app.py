@@ -13,6 +13,8 @@ import streamlit as st
 
 from PIL import Image, ImageEnhance, ImageOps
 
+import ic_light_pipeline
+
 # ── logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -171,6 +173,25 @@ def _rembg_session():
     return session
 
 
+# ── IC-Light models (loaded once, cached for the lifetime of the server) ──────
+
+@st.cache_resource(show_spinner=False)
+def _ic_light_models():
+    log.info("Loading IC-Light models (first run downloads ~5.5 GB) …")
+    t0 = time.perf_counter()
+    try:
+        models = ic_light_pipeline.load_models()
+    except Exception as exc:
+        log.error("Failed to load IC-Light models: %s", exc, exc_info=True)
+        raise RuntimeError(
+            "Could not load IC-Light relighting models. "
+            "Check your internet connection and that torch/diffusers are installed. "
+            f"Detail: {exc}"
+        ) from exc
+    log.info("IC-Light models ready in %.1f s", time.perf_counter() - t0)
+    return models
+
+
 # ── image processing ───────────────────────────────────────────────────────────
 
 def _extract_subject(pil_img: Image.Image) -> tuple[np.ndarray, np.ndarray]:
@@ -244,14 +265,15 @@ def generate_product_shadow(r_mask, bx_s, by_s, bw_s, bh_s,
 
 def make_listing(pil_img: Image.Image):
     """
-    Full pipeline: rembg subject extraction → crop → 1600×1600 canvas + shadow.
+    Full pipeline:
+      1. rembg  — extract subject (isnet-general-use, post_process_mask=True)
+      2. IC-Light — relight with left-side studio light (fixed seed for consistency)
+      3. Crop + place on 1600×1600 canvas with soft drop shadow
+
     Returns (result_pil, warning_str | None).
-    On rembg failure returns (None, user-friendly error string) instead of raising.
+    Returns (None, error_str) if extraction or relighting fails.
     """
-    log.info(
-        "make_listing: start  input=%dx%d",
-        pil_img.width, pil_img.height,
-    )
+    log.info("make_listing: start  input=%dx%d", pil_img.width, pil_img.height)
     t_total = time.perf_counter()
 
     try:
@@ -259,6 +281,16 @@ def make_listing(pil_img: Image.Image):
     except RuntimeError as exc:
         log.warning("make_listing: subject extraction failed — %s", exc)
         return None, str(exc)
+
+    # ── IC-Light: relight with left-side studio light ─────────────────────────
+    try:
+        models = _ic_light_models()
+        fg_for_iclight = ic_light_pipeline.prepare_fg(rgb, alpha)
+        log.info("make_listing: running IC-Light relighting …")
+        rgb, alpha = ic_light_pipeline.relight_left(fg_for_iclight, alpha, models)
+    except Exception as exc:
+        log.warning("make_listing: IC-Light failed (%s) — using un-relit image", exc)
+        # Non-fatal: fall back to rembg output without relighting
 
     h, w = rgb.shape[:2]
     total = h * w
