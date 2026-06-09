@@ -22,10 +22,10 @@ logging.basicConfig(
 log = logging.getLogger("cj_listing")
 
 # ── rembg model selection ──────────────────────────────────────────────────────
-# u2net          – general-purpose, 173 MB, good baseline
-# isnet-general-use – newer architecture, slightly higher quality on product shots
-# Override via env: CJ_REMBG_MODEL=isnet-general-use
-_REMBG_MODEL: str = os.environ.get("CJ_REMBG_MODEL", "u2net")
+# isnet-general-use  ~170 MB  default – DIS architecture, better edges on products
+# birefnet-general   ~400 MB  best quality; override via env var below
+# u2net              ~173 MB  original baseline (kept for reference)
+_REMBG_MODEL: str = os.environ.get("CJ_REMBG_MODEL", "isnet-general-use")
 
 # ── page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -153,7 +153,6 @@ st.markdown(
 
 @st.cache_resource(show_spinner=False)
 def _rembg_session():
-    """Load the rembg ONNX session.  First run downloads ~170 MB from GitHub."""
     from rembg import new_session
 
     log.info("Loading rembg model '%s' …", _REMBG_MODEL)
@@ -161,13 +160,10 @@ def _rembg_session():
     try:
         session = new_session(_REMBG_MODEL)
     except Exception as exc:
-        log.error(
-            "Failed to initialise rembg model '%s': %s",
-            _REMBG_MODEL, exc, exc_info=True,
-        )
+        log.error("Failed to load rembg model '%s': %s", _REMBG_MODEL, exc, exc_info=True)
         raise RuntimeError(
             f'Could not load background-removal model "{_REMBG_MODEL}". '
-            "Check your internet connection — the first run downloads ~170 MB. "
+            "Check your internet connection — the first run downloads the model weights. "
             f"Detail: {exc}"
         ) from exc
 
@@ -177,26 +173,31 @@ def _rembg_session():
 
 # ── image processing ───────────────────────────────────────────────────────────
 
-def _extract_subject(pil_img: Image.Image):
+def _extract_subject(pil_img: Image.Image) -> tuple[np.ndarray, np.ndarray]:
     """
-    Remove background with rembg and return (rgb, alpha) as uint8 numpy arrays.
-    alpha is a smooth 0-255 channel — no hard thresholding done here.
+    Remove background with rembg.  Returns (rgb, alpha) as uint8 numpy arrays.
 
-    Raises RuntimeError with a user-friendly message on failure.
+    Uses post_process_mask=True to run rembg's built-in mask cleanup (morphological
+    open/close + connected-component filtering).  No additional hand-rolled
+    post-processing is needed or applied on top of this.
     """
     from rembg import remove as rembg_remove
 
     log.info(
-        "Removing background from %dx%d image using model '%s' …",
+        "Removing background: %dx%d  model=%s",
         pil_img.width, pil_img.height, _REMBG_MODEL,
     )
     t0 = time.perf_counter()
 
     try:
         session = _rembg_session()
-        rgba = rembg_remove(pil_img.convert("RGBA"), session=session)
+        rgba = rembg_remove(
+            pil_img.convert("RGBA"),
+            session=session,
+            post_process_mask=True,
+        )
     except RuntimeError:
-        raise  # session-load error already logged inside _rembg_session()
+        raise
     except MemoryError as exc:
         log.error("OOM during rembg inference: %s", exc, exc_info=True)
         raise RuntimeError(
@@ -213,86 +214,6 @@ def _extract_subject(pil_img: Image.Image):
     log.info("Background removed in %.2f s", time.perf_counter() - t0)
     arr = np.array(rgba)
     return arr[:, :, :3], arr[:, :, 3]
-
-
-def _tighten_alpha(alpha: np.ndarray) -> np.ndarray:
-    """
-    Post-process rembg alpha:
-    1. Remove isolated noise specks (small open/close)
-    2. Fill topologically enclosed holes (e.g. ring centre, frame window)
-    3. Hard-zero pixels below confidence threshold
-       – rembg assigns alpha 0-80 to background gaps between limbs;
-         zeroing them forces those gaps to be fully transparent on the
-         canvas (white) rather than showing a faint background colour.
-    Soft product edges (alpha ≥ 80) are preserved for natural blending.
-    """
-    # ── 1. Binary mask + tiny speck cleanup ──────────────────────────────────
-    _, binary = cv2.threshold(alpha, 15, 255, cv2.THRESH_BINARY)
-    k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN,  k3, iterations=1)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k3, iterations=2)
-
-    # ── 2. Fill topologically enclosed holes ─────────────────────────────────
-    inv = cv2.bitwise_not(binary)
-    _, labels = cv2.connectedComponents(inv, connectivity=8)
-    border_labels = set(np.concatenate([
-        labels[0, :], labels[-1, :],
-        labels[1:-1, 0], labels[1:-1, -1],
-    ]).tolist())
-    filled = binary.copy()
-    for lbl in np.unique(labels):
-        if lbl != 0 and lbl not in border_labels:
-            filled[labels == lbl] = 255     # enclosed hole → opaque
-
-    # ── 3. Re-apply alpha; fix holes; hard-zero low-confidence pixels ────────
-    # Pixels inside enclosed holes had alpha=0 → set to 255 (product colour)
-    # Pixels outside the mask → 0
-    # Background-gap pixels (alpha 1-79) → 0 (transparent = canvas white)
-    out = np.where(
-        filled > 0,
-        np.where(alpha > 0, alpha, np.uint8(255)),
-        np.uint8(0),
-    ).astype(np.uint8)
-    out[out < 80] = 0   # kill semi-transparent background residue in gaps
-    return out
-
-
-def _color_guided_cleanup(rgb: np.ndarray, alpha: np.ndarray) -> np.ndarray:
-    """
-    Second-pass cleanup: zero moderate-alpha pixels (80–210) whose colour
-    closely matches the detected background colour.
-
-    This catches concave "gap" areas (e.g. between arm and body) that rembg
-    assigns surprisingly high alpha because they're surrounded by product
-    pixels, yet their actual colour is the background.
-
-    Skipped automatically when the background is near-white (mean ≥ 230) to
-    avoid incorrectly removing white parts of the product.
-    """
-    h, w = rgb.shape[:2]
-    b = max(10, min(30, h // 20, w // 20))
-
-    # ── Estimate background colour from image border strips ──────────────────
-    strips = [rgb[:b, :], rgb[-b:, :], rgb[:, :b], rgb[:, -b:]]
-    border_px = np.concatenate([s.reshape(-1, 3) for s in strips]).astype(np.float32)
-    if len(border_px) == 0:
-        return alpha
-
-    bg_color = np.median(border_px, axis=0)   # (3,) float32
-
-    # Skip if background is near-white — colour distance too unreliable
-    if float(np.mean(bg_color)) > 230:
-        return alpha
-
-    # ── Per-pixel L2 colour distance from background ─────────────────────────
-    diff = rgb.astype(np.float32) - bg_color
-    dist = np.sqrt((diff ** 2).sum(axis=2))   # (h, w)
-
-    # Zero alpha where: uncertain zone (80–210) AND colour ≈ background
-    out = alpha.copy()
-    uncertain = (alpha >= 80) & (alpha <= 210)
-    out[uncertain & (dist < 45)] = 0
-    return out
 
 
 def generate_product_shadow(r_mask, bx_s, by_s, bw_s, bh_s,
@@ -338,10 +259,6 @@ def make_listing(pil_img: Image.Image):
     except RuntimeError as exc:
         log.warning("make_listing: subject extraction failed — %s", exc)
         return None, str(exc)
-
-    log.info("make_listing: running alpha post-processing …")
-    alpha = _tighten_alpha(alpha)
-    alpha = _color_guided_cleanup(rgb, alpha)   # zero gap pixels matching bg colour
 
     h, w = rgb.shape[:2]
     total = h * w
