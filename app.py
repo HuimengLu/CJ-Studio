@@ -1,15 +1,31 @@
 import functools
 import http.server
 import io
+import logging
 import os
 import socket
 import threading
+import time
 
 import cv2
 import numpy as np
 import streamlit as st
 
 from PIL import Image, ImageEnhance, ImageOps
+
+# ── logging ────────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s – %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger("cj_listing")
+
+# ── rembg model selection ──────────────────────────────────────────────────────
+# u2net          – general-purpose, 173 MB, good baseline
+# isnet-general-use – newer architecture, slightly higher quality on product shots
+# Override via env: CJ_REMBG_MODEL=isnet-general-use
+_REMBG_MODEL: str = os.environ.get("CJ_REMBG_MODEL", "u2net")
 
 # ── page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -137,20 +153,65 @@ st.markdown(
 
 @st.cache_resource(show_spinner=False)
 def _rembg_session():
+    """Load the rembg ONNX session.  First run downloads ~170 MB from GitHub."""
     from rembg import new_session
-    return new_session("u2net")
+
+    log.info("Loading rembg model '%s' …", _REMBG_MODEL)
+    t0 = time.perf_counter()
+    try:
+        session = new_session(_REMBG_MODEL)
+    except Exception as exc:
+        log.error(
+            "Failed to initialise rembg model '%s': %s",
+            _REMBG_MODEL, exc, exc_info=True,
+        )
+        raise RuntimeError(
+            f'Could not load background-removal model "{_REMBG_MODEL}". '
+            "Check your internet connection — the first run downloads ~170 MB. "
+            f"Detail: {exc}"
+        ) from exc
+
+    log.info("rembg session ready in %.1f s", time.perf_counter() - t0)
+    return session
 
 
 # ── image processing ───────────────────────────────────────────────────────────
 
 def _extract_subject(pil_img: Image.Image):
     """
-    Remove background with rembg/U2Net and return (rgb, alpha) as uint8 arrays.
+    Remove background with rembg and return (rgb, alpha) as uint8 numpy arrays.
     alpha is a smooth 0-255 channel — no hard thresholding done here.
+
+    Raises RuntimeError with a user-friendly message on failure.
     """
     from rembg import remove as rembg_remove
-    rgba = rembg_remove(pil_img.convert("RGBA"), session=_rembg_session())
-    arr  = np.array(rgba)
+
+    log.info(
+        "Removing background from %dx%d image using model '%s' …",
+        pil_img.width, pil_img.height, _REMBG_MODEL,
+    )
+    t0 = time.perf_counter()
+
+    try:
+        session = _rembg_session()
+        rgba = rembg_remove(pil_img.convert("RGBA"), session=session)
+    except RuntimeError:
+        raise  # session-load error already logged inside _rembg_session()
+    except MemoryError as exc:
+        log.error("OOM during rembg inference: %s", exc, exc_info=True)
+        raise RuntimeError(
+            "Not enough memory to process this image. "
+            "Try a smaller image (< 4000 × 4000 px)."
+        ) from exc
+    except Exception as exc:
+        log.error("rembg.remove() failed: %s", exc, exc_info=True)
+        raise RuntimeError(
+            f"Background removal failed ({type(exc).__name__}). "
+            "Try a different image or restart the app."
+        ) from exc
+
+    log.info("Background removed in %.2f s", time.perf_counter() - t0)
+    arr = np.array(rgba)
     return arr[:, :, :3], arr[:, :, 3]
 
 
@@ -264,8 +325,21 @@ def make_listing(pil_img: Image.Image):
     """
     Full pipeline: rembg subject extraction → crop → 1600×1600 canvas + shadow.
     Returns (result_pil, warning_str | None).
+    On rembg failure returns (None, user-friendly error string) instead of raising.
     """
-    rgb, alpha = _extract_subject(pil_img)
+    log.info(
+        "make_listing: start  input=%dx%d",
+        pil_img.width, pil_img.height,
+    )
+    t_total = time.perf_counter()
+
+    try:
+        rgb, alpha = _extract_subject(pil_img)
+    except RuntimeError as exc:
+        log.warning("make_listing: subject extraction failed — %s", exc)
+        return None, str(exc)
+
+    log.info("make_listing: running alpha post-processing …")
     alpha = _tighten_alpha(alpha)
     alpha = _color_guided_cleanup(rgb, alpha)   # zero gap pixels matching bg colour
 
@@ -274,10 +348,12 @@ def make_listing(pil_img: Image.Image):
 
     fg_px = int(np.count_nonzero(alpha > 15))
     if fg_px < total * 0.01:
+        log.warning("make_listing: foreground too small (fg_px=%d / total=%d)", fg_px, total)
         return None, "Could not detect the item. Try a photo with a cleaner background."
 
     pts = cv2.findNonZero((alpha > 15).astype(np.uint8) * 255)
     if pts is None:
+        log.warning("make_listing: findNonZero returned None")
         return None, "Could not detect the item. Try a photo with a cleaner background."
     bx, by, bw, bh = cv2.boundingRect(pts)
 
@@ -356,6 +432,11 @@ def make_listing(pil_img: Image.Image):
     out = Image.fromarray(canvas)
     out = ImageEnhance.Brightness(out).enhance(1.02)
     out = ImageEnhance.Contrast(out).enhance(1.05)
+
+    log.info(
+        "make_listing: done in %.2f s  output=%dx%d",
+        time.perf_counter() - t_total, out.width, out.height,
+    )
     return out, None
 
 
