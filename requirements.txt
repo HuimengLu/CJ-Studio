@@ -23,8 +23,8 @@ tqdm>=4.65.0               # download progress (shown on first model fetch)
 # Pin to versions tested with IC-Light; diffusers 0.28+ changes the pipeline API.
 # For Apple Silicon: PyTorch MPS backend is used automatically (float32).
 # For NVIDIA GPU:    install torch with CUDA and set CJ_REMBG_MODEL=birefnet-general.
-diffusers==0.27.2
-transformers==4.36.2
+diffusers>=0.38.0
+transformers>=4.40.0
 safetensors>=0.4.2
 einops>=0.7.0
 # torch and torchvision are intentionally unpinned — install the variant matching
