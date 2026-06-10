@@ -143,11 +143,6 @@ st.markdown(
     font-size: 0.88rem;
     margin: 0.8rem 0;
   }}
-  .divider {{
-    border: none;
-    border-top: 1px solid #e8e8e4;
-    margin: 1.5rem 0;
-  }}
 </style>
 """,
     unsafe_allow_html=True,
@@ -1258,7 +1253,7 @@ else:
     st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
 
     # ── Text overlay toggle ───────────────────────────────────────────────────
-    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+    st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
     st.markdown(
         "<p style='font-size:0.72rem;font-weight:700;letter-spacing:0.08em;"
         "text-transform:uppercase;color:#aaa;margin-bottom:0.5rem;'>Text format</p>",
@@ -1284,7 +1279,7 @@ else:
         )
 
     # ── Description text input ────────────────────────────────────────────────
-    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+    st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
     st.markdown(
         "<p style='font-size:0.72rem;font-weight:700;letter-spacing:0.08em;"
         "text-transform:uppercase;color:#aaa;margin-bottom:0.5rem;'>Description</p>",
@@ -1303,7 +1298,7 @@ else:
         # Clicking blurs the input, which commits its value before the rerun.
         st.button("Apply", type="primary", use_container_width=True)
 
-    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+    st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
 
     _base_result = st.session_state.result
 
