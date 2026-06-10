@@ -1286,11 +1286,10 @@ else:
             "text-transform:uppercase;color:#aaa;margin-bottom:0.5rem;'>Description</p>",
             unsafe_allow_html=True,
         )
-        _desc_col, _apply_col = st.columns([5, 1], vertical_alignment="bottom")
+        _desc_col, _apply_col, _clear_col = st.columns([4, 1, 1], vertical_alignment="bottom")
         with _desc_col:
             st.text_input(
                 "Description text",
-                value=st.session_state.description_text,
                 placeholder="e.g. Premium condition",
                 label_visibility="collapsed",
                 key="description_text",
@@ -1298,6 +1297,14 @@ else:
         with _apply_col:
             # Clicking blurs the input, which commits its value before the rerun.
             st.button("Apply", type="primary", use_container_width=True)
+        with _clear_col:
+            # Callback runs before the rerun, so the emptied value wins over
+            # whatever the blur just committed.
+            st.button(
+                "Clear",
+                use_container_width=True,
+                on_click=lambda: st.session_state.update(description_text=""),
+            )
 
     st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
 
