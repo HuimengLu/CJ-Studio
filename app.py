@@ -1298,13 +1298,14 @@ else:
             # Clicking blurs the input, which commits its value before the rerun.
             st.button("Apply", type="primary", use_container_width=True)
         with _clear_col:
-            # Callback runs before the rerun, so the emptied value wins over
-            # whatever the blur just committed.
-            st.button(
-                "Clear",
-                use_container_width=True,
-                on_click=lambda: st.session_state.update(description_text=""),
-            )
+            if st.session_state.description_text.strip():
+                # Callback runs before the rerun, so the emptied value wins over
+                # whatever the blur just committed.
+                st.button(
+                    "Clear",
+                    use_container_width=True,
+                    on_click=lambda: st.session_state.update(description_text=""),
+                )
 
     st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
 
