@@ -1,6 +1,7 @@
 import base64
 import functools
 import io
+import json
 import logging
 import math
 import os
@@ -10,8 +11,8 @@ import time
 import cv2
 import numpy as np
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
-import os
 
 # ── logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -28,9 +29,12 @@ log = logging.getLogger("cj_listing")
 _REMBG_MODEL: str = os.environ.get("CJ_REMBG_MODEL", "u2net")
 
 # ── page config ────────────────────────────────────────────────────────────────
+# ?view=social shows the embedded IAAC tool; default is the Listing formatter.
+_VIEW = st.query_params.get("view", "listing")
+
 st.set_page_config(
     page_title="CJ Listing Formatter",
-    layout="centered",
+    layout="wide" if _VIEW == "social" else "centered",
     initial_sidebar_state="collapsed",
 )
 
@@ -1086,10 +1090,10 @@ if "bg_image" not in st.session_state:
 if "description_text" not in st.session_state:
     st.session_state.description_text = ""
 
-# ── Nav pill — served by Streamlit's built-in static file server ──────────────
-# The IAAC static app lives at static/iaac/ and is served by Streamlit at
-# /app/static/iaac/ (requires enableStaticServing = true in .streamlit/config.toml).
-# The nav pill in index.html is baked in; no separate HTTP server needed.
+# ── Nav pill + view router ─────────────────────────────────────────────────────
+# Both tools run on this single Streamlit server, so the app works when
+# deployed (e.g. Streamlit Cloud) where only one port is exposed.
+# ?view=social renders the IAAC app inline via st.components.v1.html.
 _NAV_CSS = """\
 #cj-nav{display:inline-flex;gap:4px;background:#fff;border-radius:8px;padding:4px;
         box-shadow:0 2px 10px rgba(0,0,0,.10)}
@@ -1102,15 +1106,87 @@ _NAV_CSS = """\
 #cj-nav a.cj-np{cursor:pointer;color:#888 !important;text-decoration:none !important}
 #cj-nav .cj-np:not(.active):hover{background:#f5f5f5}"""
 
+_IAAC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "iaac")
 
+
+@st.cache_resource(show_spinner=False)
+def _iaac_component_html() -> str:
+    """Build a self-contained HTML document for the IAAC tool.
+
+    Streamlit's static file server labels text files as text/plain + nosniff,
+    so <link>/<script src> tags pointing at it are blocked by the browser.
+    CSS and JS are therefore inlined.  Binary assets (shape PNGs, woff fonts)
+    are fine — they load through <base href> from /app/static/iaac/
+    (enableStaticServing = true in .streamlit/config.toml).  Pattern SVGs
+    would be blocked too, so they're injected as base64 data URIs and the
+    bundle's URL builder is patched to use them.
+    """
+    with open(os.path.join(_IAAC_DIR, "index.html"), encoding="utf-8") as f:
+        html = f.read()
+    with open(os.path.join(_IAAC_DIR, "bundle", "main.css"), encoding="utf-8") as f:
+        css = f.read()
+    with open(os.path.join(_IAAC_DIR, "bundle", "main.js"), encoding="utf-8") as f:
+        js = f.read()
+
+    # Font urls in the bundle are relative to bundle/; the document base
+    # points at the iaac root, so drop the ../
+    css = css.replace('url("../assets/', 'url("assets/')
+
+    patterns = {}
+    pattern_dir = os.path.join(_IAAC_DIR, "assets", "patterns")
+    for name in sorted(os.listdir(pattern_dir)):
+        if name.startswith("pattern-") and name.endswith(".svg") and " " not in name:
+            key = name[len("pattern-"):-len(".svg")]
+            with open(os.path.join(pattern_dir, name), "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            patterns[key] = f"data:image/svg+xml;base64,{b64}"
+
+    js = js.replace(
+        "return `assets/patterns/pattern-${value}.svg`;",
+        "return (window.__IAAC_PATTERNS||{})[value]"
+        " || `assets/patterns/pattern-${value}.svg`;",
+    )
+
+    html = html.replace("<head>", '<head>\n\t<base href="/app/static/iaac/">', 1)
+    html = html.replace(
+        '<link rel="stylesheet" href="bundle/main.css"/>',
+        "<style>html,body{height:100%}</style>\n\t<style>\n" + css + "\n\t</style>",
+    )
+    html = html.replace(
+        '<script src="bundle/main.js"></script>',
+        "<script>window.__IAAC_PATTERNS=" + json.dumps(patterns) + "</script>\n"
+        "\t\t<script>\n" + js + "\n\t\t</script>",
+    )
+    return html
+
+
+def _nav_pill(active: str) -> str:
+    listing = (
+        '<span class="cj-np active">Listing</span>' if active == "listing"
+        else '<a class="cj-np" href="?view=listing" target="_self">Listing</a>'
+    )
+    social = (
+        '<span class="cj-np active">Social</span>' if active == "social"
+        else '<a class="cj-np" href="?view=social" target="_self">Social</a>'
+    )
+    return f'<div id="cj-nav">{listing}{social}</div>'
+
+
+if _VIEW == "social":
+    st.markdown(
+        f"<style>{_NAV_CSS}\n"
+        ".block-container{max-width:100% !important;"
+        "padding-top:1.2rem !important;padding-bottom:0.5rem !important}</style>"
+        + _nav_pill("social"),
+        unsafe_allow_html=True,
+    )
+    components.html(_iaac_component_html(), height=860, scrolling=True)
+    st.stop()
 
 st.markdown(
     f"<style>{_NAV_CSS}</style>"
-    f'<div id="cj-nav">'
-    f'  <span class="cj-np active">Listing</span>'
-    f'  <a class="cj-np" href="/app/static/iaac/index.html">Social</a>'
-    f"</div>"
-    f"<h2 style='color:{DARK};margin:0 0 1.4rem;font-size:1.85rem;font-weight:700;'>"
+    + _nav_pill("listing")
+    + f"<h2 style='color:{DARK};margin:0 0 1.4rem;font-size:1.85rem;font-weight:700;'>"
     "CJ Listing Formatter</h2>",
     unsafe_allow_html=True,
 )
