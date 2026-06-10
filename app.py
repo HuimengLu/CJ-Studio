@@ -1278,25 +1278,26 @@ else:
             unsafe_allow_html=True,
         )
 
-    # ── Description text input ────────────────────────────────────────────────
-    st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
-    st.markdown(
-        "<p style='font-size:0.72rem;font-weight:700;letter-spacing:0.08em;"
-        "text-transform:uppercase;color:#aaa;margin-bottom:0.5rem;'>Description</p>",
-        unsafe_allow_html=True,
-    )
-    _desc_col, _apply_col = st.columns([5, 1], vertical_alignment="bottom")
-    with _desc_col:
-        st.text_input(
-            "Description text",
-            value=st.session_state.description_text,
-            placeholder="e.g. Premium condition",
-            label_visibility="collapsed",
-            key="description_text",
+    # ── Description text input (only in text mode) ────────────────────────────
+    if st.session_state.text_mode:
+        st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
+        st.markdown(
+            "<p style='font-size:0.72rem;font-weight:700;letter-spacing:0.08em;"
+            "text-transform:uppercase;color:#aaa;margin-bottom:0.5rem;'>Description</p>",
+            unsafe_allow_html=True,
         )
-    with _apply_col:
-        # Clicking blurs the input, which commits its value before the rerun.
-        st.button("Apply", type="primary", use_container_width=True)
+        _desc_col, _apply_col = st.columns([5, 1], vertical_alignment="bottom")
+        with _desc_col:
+            st.text_input(
+                "Description text",
+                value=st.session_state.description_text,
+                placeholder="e.g. Premium condition",
+                label_visibility="collapsed",
+                key="description_text",
+            )
+        with _apply_col:
+            # Clicking blurs the input, which commits its value before the rerun.
+            st.button("Apply", type="primary", use_container_width=True)
 
     st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
 
@@ -1311,8 +1312,8 @@ else:
     _before = _crop_before(st.session_state.original, st.session_state.ratio)
     _after  = _crop_result(_display_result, st.session_state.ratio)
     
-    # Add description text if provided
-    if st.session_state.description_text.strip():
+    # Add description text if provided (text mode only — the input is hidden otherwise)
+    if st.session_state.text_mode and st.session_state.description_text.strip():
         _after = _add_description_text(_after, st.session_state.description_text.strip())
 
     _png_bytes = _to_png_bytes(_after)
