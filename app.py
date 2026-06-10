@@ -1,29 +1,31 @@
+import base64
 import functools
 import http.server
 import io
 import logging
-import os
+import math
 import socket
+import textwrap
 import threading
 import time
 
 import cv2
 import numpy as np
 import streamlit as st
-
-from PIL import Image, ImageEnhance, ImageOps
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
+import os
 
 # ── logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s – %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("cj_listing")
 
 # ── rembg model selection ──────────────────────────────────────────────────────
-# u2net          – general-purpose, 173 MB, good baseline
-# isnet-general-use – newer architecture, slightly higher quality on product shots
+# u2net          - general-purpose, 173 MB, good baseline
+# isnet-general-use - newer architecture, slightly higher quality on product shots
 # Override via env: CJ_REMBG_MODEL=isnet-general-use
 _REMBG_MODEL: str = os.environ.get("CJ_REMBG_MODEL", "u2net")
 
@@ -41,7 +43,7 @@ st.markdown(
     f"""
 <style>
   [data-testid="stAppViewContainer"] {{ background: #f8f8f5; }}
-  .block-container {{ max-width: 880px; padding-top: 3rem; padding-bottom: 3rem; }}
+  .block-container {{ max-width: 880px; padding-top: 2.5rem; padding-bottom: 3rem; }}
   header[data-testid="stHeader"] {{ background: transparent; box-shadow: none; }}
   [data-testid="stFileUploader"] {{
     border: 2px dashed {PRIMARY};
@@ -138,12 +140,6 @@ st.markdown(
     border-top: 1px solid #e8e8e4;
     margin: 1.5rem 0;
   }}
-  /* ── Hide sidebar & collapse arrow ── */
-  [data-testid="stSidebar"],
-  [data-testid="collapsedControl"] {{
-    display: none !important;
-  }}
-  [data-testid="stStatusWidget"] {{ display: none !important; }}
 </style>
 """,
     unsafe_allow_html=True,
@@ -153,10 +149,9 @@ st.markdown(
 
 @st.cache_resource(show_spinner=False)
 def _rembg_session():
-    """Load the rembg ONNX session.  First run downloads ~170 MB from GitHub."""
     from rembg import new_session
 
-    log.info("Loading rembg model '%s' …", _REMBG_MODEL)
+    log.info("Loading rembg model '%s'...", _REMBG_MODEL)
     t0 = time.perf_counter()
     try:
         session = new_session(_REMBG_MODEL)
@@ -167,7 +162,7 @@ def _rembg_session():
         )
         raise RuntimeError(
             f'Could not load background-removal model "{_REMBG_MODEL}". '
-            "Check your internet connection — the first run downloads ~170 MB. "
+            "Check your internet connection. The first run downloads the model. "
             f"Detail: {exc}"
         ) from exc
 
@@ -179,29 +174,26 @@ def _rembg_session():
 
 def _extract_subject(pil_img: Image.Image):
     """
-    Remove background with rembg and return (rgb, alpha) as uint8 numpy arrays.
+    Remove background with rembg/U2Net and return (rgb, alpha) as uint8 arrays.
     alpha is a smooth 0-255 channel — no hard thresholding done here.
-
-    Raises RuntimeError with a user-friendly message on failure.
     """
     from rembg import remove as rembg_remove
 
     log.info(
-        "Removing background from %dx%d image using model '%s' …",
+        "Removing background from %dx%d image using model '%s'...",
         pil_img.width, pil_img.height, _REMBG_MODEL,
     )
     t0 = time.perf_counter()
 
     try:
-        session = _rembg_session()
-        rgba = rembg_remove(pil_img.convert("RGBA"), session=session)
+        rgba = rembg_remove(pil_img.convert("RGBA"), session=_rembg_session())
     except RuntimeError:
-        raise  # session-load error already logged inside _rembg_session()
+        raise
     except MemoryError as exc:
         log.error("OOM during rembg inference: %s", exc, exc_info=True)
         raise RuntimeError(
             "Not enough memory to process this image. "
-            "Try a smaller image (< 4000 × 4000 px)."
+            "Try a smaller image (< 4000 x 4000 px)."
         ) from exc
     except Exception as exc:
         log.error("rembg.remove() failed: %s", exc, exc_info=True)
@@ -316,8 +308,8 @@ def generate_product_shadow(r_mask, bx_s, by_s, bw_s, bh_s,
         ix0 = cx0 - s_ox;  ix1 = ix0 + (cx1 - cx0)
         shadow[cy0:cy1, cx0:cx1] = r_mask[iy0:iy1, ix0:ix1].astype(np.float32) / 255.0
 
-    shadow = cv2.GaussianBlur(shadow, (0, 0), 20.0)
-    shadow = np.clip(shadow * 0.22, 0.0, 1.0)
+    shadow = cv2.GaussianBlur(shadow, (0, 0), 24.0)
+    shadow = np.clip(shadow * 0.16, 0.0, 1.0)
     return shadow, empty
 
 
@@ -325,10 +317,9 @@ def make_listing(pil_img: Image.Image):
     """
     Full pipeline: rembg subject extraction → crop → 1600×1600 canvas + shadow.
     Returns (result_pil, warning_str | None).
-    On rembg failure returns (None, user-friendly error string) instead of raising.
     """
     log.info(
-        "make_listing: start  input=%dx%d",
+        "make_listing: start input=%dx%d",
         pil_img.width, pil_img.height,
     )
     t_total = time.perf_counter()
@@ -336,10 +327,10 @@ def make_listing(pil_img: Image.Image):
     try:
         rgb, alpha = _extract_subject(pil_img)
     except RuntimeError as exc:
-        log.warning("make_listing: subject extraction failed — %s", exc)
+        log.warning("make_listing: subject extraction failed - %s", exc)
         return None, str(exc)
 
-    log.info("make_listing: running alpha post-processing …")
+    log.info("make_listing: running alpha post-processing...")
     alpha = _tighten_alpha(alpha)
     alpha = _color_guided_cleanup(rgb, alpha)   # zero gap pixels matching bg colour
 
@@ -364,9 +355,9 @@ def make_listing(pil_img: Image.Image):
     crop_rgb   = rgb[y1:y2, x1:x2]
     crop_alpha = alpha[y1:y2, x1:x2]
 
-    # ── Canvas ────────────────────────────────────────────────────────────────
+    # ── Canvas ──────────────────────────────────────────────────────────────
     CS = 1600
-    canvas = np.full((CS, CS, 3), [224, 221, 211], dtype=np.uint8)  # #E0DDD3
+    canvas = np.full((CS, CS, 3), [253, 253, 242], dtype=np.uint8)  # #FDFDF2
 
     # Scale so the SUBJECT's longest side fills 75 % of the canvas.
     # Using bw/bh (not crop dims) ensures the item is never scaled down
@@ -421,20 +412,30 @@ def make_listing(pil_img: Image.Image):
         canvas_f[:, :, c] = np.clip(canvas_f[:, :, c] * (1.0 - total_shadow), 0, 255)
     canvas = canvas_f.astype(np.uint8)
 
-    # ── Composite item ────────────────────────────────────────────────────────
+    # ── Composite item ───────────────────────────────────────────────────────
     alpha_f = r_mask[img_y, img_x].astype(np.float32) / 255.0
     roi = canvas[can_y, can_x].astype(np.float32)
     for c in range(3):
         roi[:, :, c] = r_rgb[img_y, img_x, c] * alpha_f + roi[:, :, c] * (1.0 - alpha_f)
     canvas[can_y, can_x] = roi.astype(np.uint8)
 
+    # ── Store full-canvas subject mask + RGBA for text overlay ───────────────
+    full_mask = np.zeros((CS, CS), dtype=np.uint8)
+    full_mask[can_y, can_x] = r_mask[img_y, img_x]
+
+    full_rgba = np.zeros((CS, CS, 4), dtype=np.uint8)
+    full_rgba[can_y, can_x, :3] = r_rgb[img_y, img_x]
+    full_rgba[can_y, can_x,  3] = r_mask[img_y, img_x]
+
+    st.session_state["subject_mask"] = full_mask
+    st.session_state["subject_rgba"] = full_rgba
+
     # Subtle brightness + contrast lift
     out = Image.fromarray(canvas)
     out = ImageEnhance.Brightness(out).enhance(1.02)
     out = ImageEnhance.Contrast(out).enhance(1.05)
-
     log.info(
-        "make_listing: done in %.2f s  output=%dx%d",
+        "make_listing: done in %.2f s output=%dx%d",
         time.perf_counter() - t_total, out.width, out.height,
     )
     return out, None
@@ -446,7 +447,593 @@ def _to_png_bytes(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
+# ── Text overlay styles ──────────────────────────────────────────────────────────
+
+TEXT_STYLES = {
+    "Bold & Loud": {
+        "desc": "Big chunky letters, crayon-sketch feel",
+        "emoji": "📢",
+    },
+    "Clean & Minimal": {
+        "desc": "Simple sans-serif, quiet and modern",
+        "emoji": "✦",
+    },
+    "Handwritten": {
+        "desc": "Casual brushstroke energy",
+        "emoji": "✍️",
+    },
+    "Retro Stamp": {
+        "desc": "Vintage badge with distressed edges",
+        "emoji": "🔖",
+    },
+}
+
+
+def _load_font(size: int, style: str) -> ImageFont.ImageFont:
+    """Try to load a suitable system font for each style, fall back to default."""
+    candidates = {
+        "Bold & Loud": [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/Library/Fonts/Arial Bold.ttf",
+            "/Library/Fonts/Helvetica Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf",
+        ],
+        "Clean & Minimal": [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/Library/Fonts/Arial.ttf",
+            "/Library/Fonts/Helvetica.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/System/Library/Fonts/Supplemental/Helvetica.ttf",
+        ],
+        "Handwritten": [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
+            "/Library/Fonts/Brush Script MT Italic.ttf",
+            "/Library/Fonts/Apple Chancery.ttf",
+            "/System/Library/Fonts/Supplemental/Brush Script MT Italic.ttf",
+        ],
+        "Retro Stamp": [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/Library/Fonts/Arial Bold.ttf",
+            "/Library/Fonts/Helvetica Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf",
+        ],
+    }
+    for path in candidates.get(style, []):
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    try:
+        return ImageFont.load_default()
+    except Exception:
+        return ImageFont.load_default()
+
+
+def _render_bold_loud(canvas: Image.Image, text: str, CS: int, font_size: int) -> Image.Image:
+    """
+    Bold & Loud: oversized all-caps text split across two lines, rotated -8°,
+    drawn in vibrant green with a strong outline to fill the background.
+    """
+    layer = Image.new("RGBA", (CS, CS), (0, 0, 0, 0))
+    draw  = ImageDraw.Draw(layer)
+
+    words  = text.upper().split()
+    chunks = _split_words(words, 2)
+    n      = len(chunks)
+
+    font_size = max(140, min(font_size, int(CS * 0.65)))
+    font      = _load_font(font_size, "Bold & Loud")
+
+    for _ in range(24):
+        widths = [draw.textlength(c, font=font) for c in chunks]
+        if max(widths) < CS * 0.95:
+            break
+        font_size = max(140, int(font_size * 0.94))
+        font = _load_font(font_size, "Bold & Loud")
+
+    bbox   = font.getbbox("Ay")
+    lh     = bbox[3] - bbox[1] + int(font_size * 0.08)
+    y      = int(CS * 0.12)
+
+    for i, line in enumerate(chunks):
+        w = draw.textlength(line, font=font)
+        x = int(CS * 0.06) if i == 0 else int(CS * 0.05)
+
+        for dx, dy in [(-14, 0), (14, 0), (0, -14), (0, 14), (-8, -8), (8, 8)]:
+            draw.text((x + dx, y + dy), line, font=font, fill=(210, 235, 95, 240))
+        draw.text((x, y), line, font=font, fill=(18, 75, 20, 255))
+
+        for offset in range(0, int(w), 12):
+            draw.line(
+                [(x + offset, y + lh // 2), (x + offset + 14, y + lh // 2 - 10)],
+                fill=(190, 220, 80, 120), width=8,
+            )
+        y += lh
+
+    layer = layer.rotate(-8, resample=Image.BICUBIC, expand=False)
+    out   = canvas.convert("RGBA")
+    out.alpha_composite(layer)
+    return out.convert("RGB")
+
+
+def _render_background_text(canvas: Image.Image, CS: int) -> Image.Image:
+    """
+    Draw a two-line Construction Junction background text layer behind the subject.
+    """
+    lines = ["CONSTRUCTION", "JUNCTION"]
+    layer = Image.new("RGBA", (CS, CS), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+
+    font_size = int(CS * 0.18)
+    font = _load_font(font_size, "Bold & Loud")
+    for _ in range(20):
+        widths = [draw.textlength(line, font=font) for line in lines]
+        if max(widths) < CS * 0.96:
+            break
+        font_size = max(140, int(font_size * 0.94))
+        font = _load_font(font_size, "Bold & Loud")
+
+    bbox = font.getbbox("Ay")
+    line_height = bbox[3] - bbox[1] + int(font_size * 0.08)
+    total_height = line_height * len(lines)
+    y = int(CS * 0.08)
+
+    for line in lines:
+        width = draw.textlength(line, font=font)
+        x = (CS - width) // 2
+        draw.text((x, y), line, font=font, fill=(210, 235, 95, 180))
+        y += line_height
+
+    out = canvas.convert("RGBA")
+    out.alpha_composite(layer)
+    return out.convert("RGB")
+
+
+def _render_clean_minimal(canvas: Image.Image, text: str, CS: int) -> Image.Image:
+    """
+    Clean & Minimal: centred text in light gray, large but understated.
+    Split into short lines. No rotation.
+    """
+    layer = Image.new("RGBA", (CS, CS), (0, 0, 0, 0))
+    draw  = ImageDraw.Draw(layer)
+
+    words  = text.upper().split()
+    chunks = _split_words(words, 3)
+    n      = len(chunks)
+
+    font_size = max(110, CS // (n + 2))
+    font      = _load_font(font_size, "Clean & Minimal")
+
+    for _ in range(20):
+        widths = [draw.textlength(c, font=font) for c in chunks]
+        if max(widths) < CS * 0.88:
+            break
+        font_size = int(font_size * 0.88)
+        font = _load_font(font_size, "Clean & Minimal")
+
+    bbox = font.getbbox("Ay")
+    lh   = bbox[3] - bbox[1] + int(font_size * 0.18)
+    total_h = lh * n
+    y    = (CS - total_h) // 2
+
+    for line in chunks:
+        w = draw.textlength(line, font=font)
+        x = (CS - w) // 2
+        draw.text((x, y), line, font=font, fill=(160, 158, 148, 180))
+        y += lh
+
+    out = canvas.convert("RGBA")
+    out.alpha_composite(layer)
+    return out.convert("RGB")
+
+
+def _render_handwritten(canvas: Image.Image, text: str, CS: int) -> Image.Image:
+    """
+    Handwritten: italic, slightly varied line heights, warm green ink,
+    bold and textured with a gentle 3° tilt.
+    """
+    layer = Image.new("RGBA", (CS, CS), (0, 0, 0, 0))
+    draw  = ImageDraw.Draw(layer)
+
+    words  = text.upper().split()
+    chunks = _split_words(words, 3)
+    n      = len(chunks)
+
+    font_size = max(140, CS // (n + 1))
+    font      = _load_font(font_size, "Handwritten")
+
+    for _ in range(20):
+        widths = [draw.textlength(c, font=font) for c in chunks]
+        if max(widths) < CS * 0.85:
+            break
+        font_size = int(font_size * 0.88)
+        font = _load_font(font_size, "Handwritten")
+
+    bbox  = font.getbbox("Ay")
+    lh    = bbox[3] - bbox[1] + int(font_size * 0.15)
+    total_h = lh * n
+    y     = (CS - total_h) // 2
+
+    rng = np.random.default_rng(42)
+    for i, line in enumerate(chunks):
+        w    = draw.textlength(line, font=font)
+        x    = (CS - w) // 2 + int(rng.integers(-28, 28))
+        jitter = int(rng.integers(-12, 12))
+        # rough textured outline for marker effect
+        for dx, dy in [(-4, 0), (4, 0), (0, -4), (0, 4)]:
+            draw.text((x + dx, y + jitter + dy), line, font=font, fill=(45, 90, 35, 120))
+        draw.text((x, y + jitter), line, font=font, fill=(25, 70, 25, 230))
+        draw.line([(x - 10, y + lh - 8 + jitter),
+                   (x + int(w) + 10, y + lh - 10 + jitter)],
+                  fill=(40, 80, 40, 80), width=6)
+        y += lh
+
+    layer = layer.rotate(3, resample=Image.BICUBIC, expand=False)
+    out   = canvas.convert("RGBA")
+    out.alpha_composite(layer)
+    return out.convert("RGB")
+
+
+def _render_retro_stamp(canvas: Image.Image, text: str, CS: int) -> Image.Image:
+    """
+    Retro Stamp: text inside a distressed circular badge overlay,
+    dark red ink, uppercase, centred.
+    """
+    layer = Image.new("RGBA", (CS, CS), (0, 0, 0, 0))
+    draw  = ImageDraw.Draw(layer)
+
+    # ── Badge circle ──────────────────────────────────────────────────────────
+    cx, cy = CS // 2, CS // 2
+    r_outer = int(CS * 0.42)
+    r_inner = int(CS * 0.36)
+    ink = (160, 30, 20, 180)
+
+    draw.ellipse([(cx - r_outer, cy - r_outer), (cx + r_outer, cy + r_outer)],
+                 outline=ink, width=10)
+    draw.ellipse([(cx - r_inner, cy - r_inner), (cx + r_inner, cy + r_inner)],
+                 outline=ink, width=4)
+
+    # ── Text ─────────────────────────────────────────────────────────────────
+    words  = text.upper().split()
+    chunks = _split_words(words, 3)
+    n      = len(chunks)
+
+    font_size = max(90, int(r_inner * 1.2 // (n + 0.5)))
+    font      = _load_font(font_size, "Retro Stamp")
+
+    for _ in range(20):
+        widths = [draw.textlength(c, font=font) for c in chunks]
+        if max(widths) < r_inner * 1.7:
+            break
+        font_size = int(font_size * 0.88)
+        font = _load_font(font_size, "Retro Stamp")
+
+    bbox    = font.getbbox("Ay")
+    lh      = bbox[3] - bbox[1] + int(font_size * 0.12)
+    total_h = lh * n
+    y       = cy - total_h // 2
+
+    for line in chunks:
+        w = draw.textlength(line, font=font)
+        x = cx - w // 2
+        draw.text((x + 3, y + 3), line, font=font, fill=(160, 30, 20, 60))  # shadow
+        draw.text((x, y), line, font=font, fill=ink)
+        y += lh
+
+    # Distress: random noise spots to simulate worn ink
+    rng = np.random.default_rng(7)
+    arr = np.array(layer)
+    for _ in range(300):
+        px = int(rng.integers(0, CS))
+        py = int(rng.integers(0, CS))
+        if arr[py, px, 3] > 50:
+            arr[py, px, 3] = max(0, int(arr[py, px, 3]) - int(rng.integers(80, 180)))
+    layer = Image.fromarray(arr)
+
+    layer = layer.rotate(-5, resample=Image.BICUBIC, expand=False)
+    out   = canvas.convert("RGBA")
+    out.alpha_composite(layer)
+    return out.convert("RGB")
+
+
+def _split_words(words: list, max_lines: int) -> list:
+    """Split a word list into at most max_lines roughly-equal chunks."""
+    if not words:
+        return [""]
+    n = min(len(words), max_lines)
+    size = math.ceil(len(words) / n)
+    return [" ".join(words[i:i+size]) for i in range(0, len(words), size)]
+
+
+def apply_text_overlay(base: Image.Image, target_ratio: str = "1:1", description_text: str = "") -> Image.Image:
+    """
+    Composite text (background) + shadow + scaled-down centered subject.
+    The subject is pulled from subject_rgba (clean, no shadow) and repositioned.
+    target_ratio: used to position artwork so it doesn't get clipped during cropping.
+    description_text: if provided, used to center the entire composition vertically.
+    """
+    CS = base.width   # 1600
+    bg_color = (253, 253, 242)
+
+    # Start with solid colored canvas (keeps background visible under transparent artwork)
+    from PIL import Image as _PILImage
+    canvas_img = _PILImage.new("RGBA", (CS, CS), tuple(bg_color) + (255,))
+
+    # First pass: Calculate dimensions and vertical offset for centering composition
+    # Get artwork dimensions
+    artwork_w, artwork_h = 0, 0
+    if st.session_state.get("bg_image") is not None:
+        bg = st.session_state.get("bg_image")
+        bw, bh = bg.size
+        
+        ar = _RATIO_AR.get(target_ratio, 1.0)
+        if ar >= 1.0:
+            safe_width = CS
+            safe_height = int(CS / ar)
+        else:
+            safe_width = int(CS * ar)
+            safe_height = CS
+        
+        safe_margin = 0.02
+        max_w = int(safe_width * (1.0 - 2 * safe_margin))
+        max_h = int(safe_height * (1.0 - 2 * safe_margin))
+        scale = min(max_w / float(bw), max_h / float(bh))
+        artwork_w = max(1, int(bw * scale))
+        artwork_h = max(1, int(bh * scale))
+
+    # Get subject dimensions
+    subject_rgba = st.session_state.get("subject_rgba")
+    subject_w, subject_h = 0, 0
+    if subject_rgba is not None:
+        scale_factor = 0.94
+        subject_h, subject_w = subject_rgba.shape[:2]
+        subject_w = max(1, int(subject_w * scale_factor))
+        subject_h = max(1, int(subject_h * scale_factor))
+
+    # Estimate description height
+    desc_height = 0
+    if description_text.strip():
+        font_size = max(32, int(CS * 0.04 * 0.4))
+        line_height = int(font_size * 1.2)
+        max_width = int(CS * 0.9)
+        word_count = len(description_text.split())
+        avg_chars_per_line = max(3, max_width // (font_size * 0.6))
+        estimated_words_per_line = max(1, int(avg_chars_per_line / 5))
+        estimated_lines = max(1, (word_count + estimated_words_per_line - 1) // estimated_words_per_line)
+        desc_height = int(line_height * estimated_lines + CS * 0.03)
+
+    # Calculate vertical offset to center entire composition
+    artwork_gap = int(CS * 0.03)
+    subject_gap = int(CS * 0.03)
+    total_comp_height = artwork_h + artwork_gap + subject_h + subject_gap + desc_height
+    available_space = CS - total_comp_height
+    vertical_offset = max(0, available_space // 2)
+
+    # Now composite artwork with offset
+    if st.session_state.get("bg_image") is not None:
+        bg = st.session_state.get("bg_image")
+        bw, bh = bg.size
+        
+        ar = _RATIO_AR.get(target_ratio, 1.0)
+        if ar >= 1.0:
+            safe_width = CS
+            safe_height = int(CS / ar)
+        else:
+            safe_width = int(CS * ar)
+            safe_height = CS
+        
+        safe_margin = 0.02
+        max_w = int(safe_width * (1.0 - 2 * safe_margin))
+        max_h = int(safe_height * (1.0 - 2 * safe_margin))
+        scale = min(max_w / float(bw), max_h / float(bh))
+        new_w = max(1, int(bw * scale))
+        new_h = max(1, int(bh * scale))
+        
+        try:
+            resized = bg.resize((new_w, new_h), Image.LANCZOS)
+        except Exception:
+            resized = bg.resize((new_w, new_h))
+        rgba = resized.convert("RGBA")
+        
+        # Position artwork at top with centering offset
+        x = (CS - new_w) // 2
+        y = vertical_offset + max(int(CS * 0.02), int(safe_height * safe_margin))
+        canvas_img.paste(rgba, (x, y), rgba)
+        
+        # Store artwork bounds for description positioning
+        st.session_state["artwork_bottom_y"] = y + new_h
+    else:
+        # Render generated text artwork and composite it over the colored canvas
+        base_rgb = np.full((CS, CS, 3), bg_color, dtype=np.uint8)
+        text_art = _render_background_text(_PILImage.fromarray(base_rgb), CS)
+        text_rgba = text_art.convert("RGBA")
+        canvas_img.paste(text_rgba, (0, 0), text_rgba)
+
+    canvas = np.array(canvas_img.convert("RGB"))
+
+    # Get the clean subject RGBA from session state
+    subject_rgba = st.session_state.get("subject_rgba")
+    if subject_rgba is None:
+        # Fallback: just return text+subject as before
+        result = Image.fromarray(canvas)
+        result = ImageEnhance.Brightness(result).enhance(1.02)
+        result = ImageEnhance.Contrast(result).enhance(1.05)
+        return result
+
+    # Scale down the subject to 94% of original size
+    scale_factor = 0.94
+    subject_h, subject_w = subject_rgba.shape[:2]
+    new_w = max(1, int(subject_w * scale_factor))
+    new_h = max(1, int(subject_h * scale_factor))
+    
+    scaled_rgb = cv2.resize(subject_rgba[:, :, :3], (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+    scaled_alpha = cv2.resize(subject_rgba[:, :, 3], (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+
+    # Position subject with vertical centering applied
+    center_x = CS // 2
+    ox = center_x - new_w // 2
+    
+    # Calculate subject Y position based on artwork presence
+    # Use actual artwork bounds from session if available, otherwise centered with offset
+    artwork_bottom_stored = st.session_state.get("artwork_bottom_y", 0)
+    if artwork_bottom_stored > 0:
+        # Artwork was placed; position subject below it
+        subject_gap = int(CS * 0.03)
+        oy = artwork_bottom_stored + subject_gap
+    else:
+        # No artwork; use vertical centering with small offset
+        center_y = CS // 2
+        oy = center_y - new_h // 2
+        oy += vertical_offset - int(CS * 0.04)  # Apply vertical offset adjustment
+    
+    # Ensure subject stays within canvas bounds
+    oy = max(0, min(oy, CS - new_h))
+
+    # Generate shadow for the scaled subject
+    bx_s = 0
+    by_s = 0
+    bw_s = new_w
+    bh_s = new_h
+    cast_shadow, _ = generate_product_shadow(scaled_alpha, bx_s, by_s, bw_s, bh_s, ox, oy, center_x, CS)
+
+    # Composite shadow onto canvas (text layer)
+    total_shadow = np.clip(cast_shadow, 0.0, 1.0)
+    canvas_f = canvas.astype(np.float32)
+    for c in range(3):
+        canvas_f[:, :, c] = np.clip(canvas_f[:, :, c] * (1.0 - total_shadow), 0, 255)
+    canvas = canvas_f.astype(np.uint8)
+
+    # Composite scaled subject on top
+    def _slices(offset: int, length: int, limit: int):
+        c0 = max(0, offset)
+        c1 = min(limit, offset + length)
+        return slice(c0, c1), slice(c0 - offset, c1 - offset)
+
+    can_y, img_y = _slices(oy, new_h, CS)
+    can_x, img_x = _slices(ox, new_w, CS)
+
+    alpha_f = scaled_alpha[img_y, img_x].astype(np.float32) / 255.0
+    roi = canvas[can_y, can_x].astype(np.float32)
+    for c in range(3):
+        roi[:, :, c] = scaled_rgb[img_y, img_x, c] * alpha_f + roi[:, :, c] * (1.0 - alpha_f)
+    canvas[can_y, can_x] = roi.astype(np.uint8)
+
+    # Store the bottom edge of the subject for description positioning
+    subject_bottom = can_y.stop if hasattr(can_y, 'stop') else (oy + new_h)
+    st.session_state["subject_bottom_y"] = subject_bottom
+
+    result = Image.fromarray(canvas)
+    result = ImageEnhance.Brightness(result).enhance(1.02)
+    result = ImageEnhance.Contrast(result).enhance(1.05)
+    return result
+
+
+def _add_description_text(img: Image.Image, text: str) -> Image.Image:
+    """
+    Add small description text at the bottom of the image.
+    """
+    if not text.strip():
+        return img
+    
+    W, H = img.size
+    draw = ImageDraw.Draw(img)
+    
+    # Load a smaller font for description
+    font_size = max(32, int(W * 0.04))
+    font = _load_font(font_size, "Clean & Minimal")
+    
+    # Wrap text if needed
+    max_width = int(W * 0.9)
+    lines = []
+    current_line = ""
+    for word in text.split():
+        test_line = current_line + (" " if current_line else "") + word
+        if draw.textlength(test_line, font=font) > max_width:
+            if current_line:
+                lines.append(current_line)
+            current_line = word
+        else:
+            current_line = test_line
+    if current_line:
+        lines.append(current_line)
+    
+    # Draw text positioned based on product bottom edge (detected from overlay)
+    line_height = int(font_size * 1.2)
+    total_height = line_height * len(lines)
+    
+    # Use actual stored bounds from apply_text_overlay
+    subject_bottom = st.session_state.get("subject_bottom_y", H)
+    
+    # Scale from 1600x1600 to the current cropped image size
+    full_size = 1600
+    scale_factor = H / float(full_size) if H < full_size else 1.0
+    adjusted_subject_bottom = int(subject_bottom * scale_factor)
+    
+    # Position description just below the product with a small gap
+    gap = int(W * 0.03)
+    y = min(adjusted_subject_bottom + gap, H - total_height - int(W * 0.02))
+    y = max(y, int(W * 0.01))  # ensure it's not too close to top
+    
+    for line in lines:
+        width = draw.textlength(line, font=font)
+        x = (W - width) // 2
+        draw.text((x, y), line, font=font, fill=(100, 100, 100, 255))
+        y += line_height
+    
+    return img
+
+
+def _composite_by_color_diff(original: Image.Image,
+                              text_canvas: Image.Image,
+                              bg_color: tuple) -> Image.Image:
+    """Fallback: detect subject by colour distance from bg, re-composite."""
+    orig_arr = np.array(original).astype(np.float32)
+    bg       = np.array(bg_color, dtype=np.float32)
+    diff     = np.sqrt(((orig_arr - bg) ** 2).sum(axis=2))
+    mask     = (diff > 18).astype(np.float32)
+    # Soft-erode so we don't grab bg pixels near subject
+    mask_u8  = (mask * 255).astype(np.uint8)
+    k        = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask_u8  = cv2.erode(mask_u8, k, iterations=1)
+    mask     = mask_u8.astype(np.float32) / 255.0
+
+    text_arr = np.array(text_canvas).astype(np.float32)
+    for c in range(3):
+        text_arr[:, :, c] = (orig_arr[:, :, c] * mask
+                             + text_arr[:, :, c] * (1.0 - mask))
+    return Image.fromarray(text_arr.astype(np.uint8))
+
+
 _RATIO_AR = {"1:1": 1.0, "4:3": 4/3, "4:5": 4/5}
+
+
+def _detect_rgba_bounds(rgba_array: np.ndarray) -> tuple:
+    """
+    Detect the bounding box of non-transparent pixels in an RGBA array.
+    Returns (top, bottom, left, right) or None if all transparent.
+    """
+    if rgba_array.shape[2] < 4:
+        # No alpha channel
+        return (0, rgba_array.shape[0], 0, rgba_array.shape[1])
+    
+    alpha = rgba_array[:, :, 3]
+    # Find rows and cols with alpha > 0
+    rows = np.any(alpha > 0, axis=1)
+    cols = np.any(alpha > 0, axis=0)
+    
+    if not np.any(rows) or not np.any(cols):
+        return None  # All transparent
+    
+    row_indices = np.where(rows)[0]
+    col_indices = np.where(cols)[0]
+    
+    return (row_indices[0], row_indices[-1] + 1, col_indices[0], col_indices[-1] + 1)
 
 
 def _crop_result(base: Image.Image, ratio: str) -> Image.Image:
@@ -478,17 +1065,31 @@ def _crop_before(pil_img: Image.Image, ratio: str) -> Image.Image:
 
 
 # ── session state ──────────────────────────────────────────────────────────────
-for _k in ("original", "result", "warn", "_cj_pending"):
+for _k in ("original", "result", "warn", "subject_mask", "subject_rgba"):
     if _k not in st.session_state:
         st.session_state[_k] = None
 if "ratio" not in st.session_state:
     st.session_state.ratio = "1:1"
-if "_cj_loading" not in st.session_state:
-    st.session_state._cj_loading = False
+if "text_mode" not in st.session_state:
+    st.session_state.text_mode = False
+if "bg_image" not in st.session_state:
+    st.session_state.bg_image = None
+    # Auto-load project background artwork if present at repo root named 'bg_artwork.png'
+    try:
+        base_dir = os.path.dirname(__file__)
+    except Exception:
+        base_dir = os.getcwd()
+    default_bg = os.path.join(base_dir, "bg_artwork.png")
+    if os.path.exists(default_bg):
+        try:
+            st.session_state.bg_image = ImageOps.exif_transpose(Image.open(default_bg)).convert("RGBA")
+        except Exception:
+            st.session_state.bg_image = Image.open(default_bg).convert("RGBA")
+if "description_text" not in st.session_state:
+    st.session_state.description_text = ""
 
 # ── Shared nav component ──────────────────────────────────────────────────────
-# Single source-of-truth: same CSS is embedded in both the Streamlit page and
-# the iaac static page.  Only positioning differs (iaac is fixed-overlay).
+# Single source of truth for the Streamlit page and the bundled IAAC static page.
 _NAV_SHARED_CSS = """\
 #cj-nav{display:inline-flex;gap:4px;background:#fff;border-radius:8px;padding:4px;
         box-shadow:0 2px 10px rgba(0,0,0,.10)}
@@ -501,17 +1102,15 @@ _NAV_SHARED_CSS = """\
 #cj-nav a.cj-np{cursor:pointer;color:#888 !important;text-decoration:none !important}
 #cj-nav .cj-np:not(.active):hover{background:#f5f5f5}"""
 
-# ── Embedded iaac HTTP server (same process, correct MIME types) ──────────────
+
+# ── Embedded IAAC HTTP server (same process, correct MIME types) ──────────────
 _IAAC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "iaac")
+
 
 @st.cache_resource(show_spinner=False)
 def _iaac_port() -> int:
-    """Start an embedded HTTP server for the iaac static app.
-    Injects a Listing/Social nav pill into index.html.
-    Returns the port it's listening on."""
+    """Start an embedded HTTP server for the IAAC static app and return its port."""
 
-    # iaac needs the shared CSS + a fixed-position wrapper so the pill floats
-    # over the existing iaac page layout.
     _NAV_CSS = (
         "<style>\n"
         + _NAV_SHARED_CSS
@@ -556,133 +1155,57 @@ def _iaac_port() -> int:
     threading.Thread(target=_srv.serve_forever, daemon=True).start()
     return _port
 
-# Start the iaac server once; cached for the lifetime of the Streamlit process
+
 _IAAC_PORT = _iaac_port()
 
-# Nav pill — reuses the same _NAV_SHARED_CSS as the iaac page.
-# On the Streamlit page the pill sits in normal document flow (no fixed position).
+# ── UI ─────────────────────────────────────────────────────────────────────────
 st.markdown(
     f"<style>{_NAV_SHARED_CSS}</style>"
     f'<div id="cj-nav">'
     f'  <span class="cj-np active">Listing</span>'
     f'  <a class="cj-np" href="http://localhost:{_IAAC_PORT}/">Social</a>'
-    f"</div>",
+    f"</div>"
+    f"<h2 style='color:{DARK};margin:0 0 1.4rem;font-size:1.85rem;font-weight:700;'>"
+    "CJ Listing Formatter</h2>",
     unsafe_allow_html=True,
 )
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE · Item Listing (CJ Formatter)
-# ══════════════════════════════════════════════════════════════════════════════
-st.markdown(
-        f"<h2 style='color:{DARK};margin:0 0 1.4rem;font-size:1.85rem;font-weight:700;'>"
-        "CJ Listing Formatter</h2>",
-        unsafe_allow_html=True,
-    )
-
-# ── upload screen ──────────────────────────────────────────────────────────
+# ── upload screen ──────────────────────────────────────────────────────────────
 if st.session_state.result is None:
-    _is_loading = st.session_state._cj_loading
-
-    # File uploader — always rendered
-    _uploaded = st.file_uploader(
+    uploaded = st.file_uploader(
         "Drop photo here",
         type=["jpg", "jpeg", "png", "webp"],
         label_visibility="collapsed",
     )
     st.markdown(
-        "<p style='text-align:center;color:#bbb;font-size:0.78rem;"
-        "margin-top:-0.3rem;'>JPG · PNG · WEBP · up to 200 MB</p>",
+        "<p style='text-align:center;color:#bbb;font-size:0.78rem;margin-top:-0.3rem;'>"
+        "JPG · PNG · WEBP · up to 200 MB</p>",
         unsafe_allow_html=True,
     )
 
-    if not _is_loading and st.session_state.warn:
+    if st.session_state.warn:
         st.markdown(
             f"<div class='warn-box'>&#9888; {st.session_state.warn}</div>",
             unsafe_allow_html=True,
         )
 
-    # ── Loading modal — shown as a full-screen popup while processing ──────
-    if _is_loading:
-        st.markdown(
-            """
-            <style>
-            .loader {
-              width: 35px;
-              aspect-ratio: 1;
-              --c:no-repeat linear-gradient(#046D8B 0 0);
-              background:
-                var(--c) 0 0,
-                var(--c) 100% 0,
-                var(--c) 100% 100%,
-                var(--c) 0 100%;
-              animation:
-                l2-1 2s infinite,
-                l2-2 2s infinite;
-            }
-            @keyframes l2-1 {
-              0%   {background-size: 0    4px,4px 0   ,0    4px,4px 0   }
-              12.5%{background-size: 100% 4px,4px 0   ,0    4px,4px 0   }
-              25%  {background-size: 100% 4px,4px 100%,0    4px,4px 0   }
-              37.5%{background-size: 100% 4px,4px 100%,100% 4px,4px 0   }
-              45%,
-              55%  {background-size: 100% 4px,4px 100%,100% 4px,4px 100%}
-              62.5%{background-size: 0    4px,4px 100%,100% 4px,4px 100%}
-              75%  {background-size: 0    4px,4px 0   ,100% 4px,4px 100%}
-              87.5%{background-size: 0    4px,4px 0   ,0    4px,4px 100%}
-              100% {background-size: 0    4px,4px 0   ,0    4px,4px 0   }
-            }
-            @keyframes l2-2 {
-              0%,49.9%{background-position: 0 0   ,100% 0   ,100% 100%,0 100%}
-              50%,100%{background-position: 100% 0,100% 100%,0    100%,0 0   }
-            }
-            </style>
-            <div style="
-              position:fixed;top:0;left:0;right:0;bottom:0;
-              background:rgba(0,0,0,0.45);
-              z-index:99999;
-              display:flex;align-items:center;justify-content:center;
-            ">
-              <div style="
-                background:#fff;border-radius:18px;
-                padding:2.6rem 3.8rem;
-                display:flex;flex-direction:column;align-items:center;gap:1rem;
-                box-shadow:0 12px 48px rgba(0,0,0,0.18);
-              ">
-                <div class="loader"></div>
-                <span style="color:#555;font-size:0.88rem;font-weight:600;letter-spacing:0.04em;">Processing...</span>
-                <button onclick="(function(){var b=document.querySelector('[data-testid=stStatusWidget] button');if(b)b.click();})()"
-                        style="background:none;border:none;padding:0;cursor:pointer;
-                               color:#aaa;font-size:0.82rem;text-decoration:underline;">Stop</button>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        _pil_img = st.session_state._cj_pending
-        st.session_state._cj_loading = False
-        st.session_state._cj_pending = None
-
-        result, warn = make_listing(_pil_img)
+    if uploaded is not None:
+        pil_img = ImageOps.exif_transpose(Image.open(uploaded))
+        with st.spinner("Processing…"):
+            result, warn = make_listing(pil_img)
 
         if warn:
             st.session_state.warn = warn
             st.rerun()
         else:
-            st.session_state.original = _pil_img
-            st.session_state.result   = result
-            st.session_state.warn     = None
+            st.session_state.original = pil_img
+            st.session_state.result = result
+            st.session_state.warn = None
             st.rerun()
 
-    elif _uploaded is not None:
-        _pil_img = ImageOps.exif_transpose(Image.open(_uploaded))
-        st.session_state._cj_pending = _pil_img
-        st.session_state._cj_loading = True
-        st.rerun()
-
-# ── result screen ──────────────────────────────────────────────────────────
+# ── result screen ──────────────────────────────────────────────────────────────
 else:
-    # ── Ratio selector ──────────────────────────────────────────────────
+    # ── Ratio selector ──────────────────────────────────────────────────────
     st.markdown(
         "<p style='font-size:0.72rem;font-weight:700;letter-spacing:0.08em;"
         "text-transform:uppercase;color:#aaa;margin-bottom:0.3rem;'>Output ratio</p>",
@@ -707,42 +1230,132 @@ else:
             )
     st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
 
+    # ── Text overlay toggle ───────────────────────────────────────────────────
+    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+    st.markdown(
+        "<p style='font-size:0.72rem;font-weight:700;letter-spacing:0.08em;"
+        "text-transform:uppercase;color:#aaa;margin-bottom:0.5rem;'>Text format</p>",
+        unsafe_allow_html=True,
+    )
+
+    _tm_cols = st.columns([1, 4])
+    with _tm_cols[0]:
+        _toggle_label = "On ✓" if st.session_state.text_mode else "Off"
+        if st.button(
+            _toggle_label,
+            key="_toggle_text",
+            type="primary" if st.session_state.text_mode else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state.text_mode = not st.session_state.text_mode
+            st.rerun()
+    with _tm_cols[1]:
+        st.markdown(
+            "<p style='color:#999;font-size:0.82rem;margin:0.4rem 0 0;'>"
+            "Add bold text behind your product — great for social listings.</p>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Text controls (shown when text mode is on) ────────────────────────────
+    if st.session_state.text_mode:
+        st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
+
+        st.markdown(
+            "<p style='font-size:0.68rem;font-weight:700;letter-spacing:0.08em;"
+            "text-transform:uppercase;color:#bbb;margin-bottom:0.3rem;'>Background text</p>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<p style='color:#999;font-size:0.82rem;margin:0.2rem 0 0;'>"
+            "Uses the project background artwork as the full-canvas background behind the isolated subject."
+            " To change it for all outputs, place your image at <strong>bg_artwork.png</strong> in the project root."
+            "</p>",
+            unsafe_allow_html=True,
+        )
+        # Background artwork: the app will use `bg_artwork.png` in the project root if present.
+        st.markdown(
+            "<div style='margin-top:0.4rem;color:#666;font-size:0.85rem;'>"
+            "Using project background artwork if available: <strong>bg_artwork.png</strong>."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Description text input ────────────────────────────────────────────────
+    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+    st.markdown(
+        "<p style='font-size:0.72rem;font-weight:700;letter-spacing:0.08em;"
+        "text-transform:uppercase;color:#aaa;margin-bottom:0.5rem;'>Description</p>",
+        unsafe_allow_html=True,
+    )
+    st.text_input(
+        "Description text",
+        value=st.session_state.description_text,
+        placeholder="e.g. Premium condition",
+        label_visibility="collapsed",
+        key="description_text",
+    )
+
+    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+
+    _base_result = st.session_state.result
+
+    # Only apply the background/text overlay when text mode is enabled.
+    if st.session_state.text_mode:
+        _display_result = apply_text_overlay(_base_result, st.session_state.ratio, st.session_state.description_text)
+    else:
+        _display_result = _base_result
+
     _before = _crop_before(st.session_state.original, st.session_state.ratio)
-    _after  = _crop_result(st.session_state.result,   st.session_state.ratio)
+    _after  = _crop_result(_display_result, st.session_state.ratio)
+    
+    # Add description text if provided
+    if st.session_state.description_text.strip():
+        _after = _add_description_text(_after, st.session_state.description_text.strip())
 
     _png_bytes = _to_png_bytes(_after)
+    _b64 = base64.b64encode(_png_bytes).decode()
+    _data_url = f"data:image/png;base64,{_b64}"
 
     col1, col2 = st.columns(2, gap="large")
     with col1:
         st.markdown("<div class='col-label'>Before</div>", unsafe_allow_html=True)
         st.image(_before, use_container_width=True)
     with col2:
+        _dl_name = f"cj_listing_{st.session_state.ratio.replace(':','x')}.png"
         st.markdown("<div class='col-label'>After</div>", unsafe_allow_html=True)
-        st.image(_after, use_container_width=True)
-
-    # JS: clicking the image itself triggers the native Streamlit fullscreen button
-    st.markdown(
-        """<img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
-             style="display:none"
-             onload="(function(){
-               function setup(){
-                 document.querySelectorAll('[data-testid=stImage]').forEach(function(c){
-                   var img=c.querySelector('img');
-                   if(img&&!img.dataset.cjZoom){
-                     img.dataset.cjZoom='1';
-                     img.style.cursor='zoom-in';
-                     img.addEventListener('click',function(){
-                       var btn=c.querySelector('button');
-                       if(btn)btn.click();
-                     });
-                   }
-                 });
-               }
-               setTimeout(setup,150);
-               setTimeout(setup,600);
-             })();" />""",
-        unsafe_allow_html=True,
-    )
+        st.markdown(
+            f"""<div class="cj-after" id="cj-wrap">
+              <img id="cj-thumb" src="{_data_url}"
+                   style="width:100%;border-radius:8px;display:block;cursor:zoom-in;" />
+              <button id="cj-expand" class="cj-expand-btn">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="#555555">
+                  <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+                </svg>
+              </button>
+            </div>
+            <div id="cj-lb">
+              <img id="cj-lb-img" src="{_data_url}" />
+              <a class="cj-lb-dl" id="cj-lb-dl" href="{_data_url}"
+                 download="{_dl_name}">↓ Download</a>
+            </div>
+            <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
+                 style="display:none"
+                 onload="(function(){{
+                   var t=document.getElementById('cj-thumb'),
+                       b=document.getElementById('cj-expand'),
+                       lb=document.getElementById('cj-lb'),
+                       im=document.getElementById('cj-lb-img'),
+                       dl=document.getElementById('cj-lb-dl');
+                   function op(){{lb.style.display='flex';}}
+                   function cl(){{lb.style.display='none';}}
+                   if(t)t.addEventListener('click',op);
+                   if(b)b.addEventListener('click',function(e){{e.stopPropagation();op();}});
+                   if(lb)lb.addEventListener('click',function(e){{if(e.target===lb)cl();}});
+                   if(im)im.addEventListener('click',function(e){{e.stopPropagation();}});
+                   if(dl)dl.addEventListener('click',function(e){{e.stopPropagation();}});
+                 }})();" />""",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<div style='margin-top:1.5rem;'>", unsafe_allow_html=True)
     _, btn_dl, btn_try, _ = st.columns([2.5, 1.2, 1.5, 2.5])
@@ -758,5 +1371,8 @@ else:
             st.session_state.original = None
             st.session_state.result = None
             st.session_state.warn = None
+            st.session_state.text_mode = False
+            st.session_state.description_text = ""
+            st.session_state.subject_mask = None
+            st.session_state.subject_rgba = None
             st.rerun()
-
