@@ -89,6 +89,12 @@ st.markdown(
     padding: 0.3rem 0 !important;
     font-size: 0.85rem !important;
   }}
+  /* Text inputs: dark-green focus ring instead of theme red */
+  [data-testid="stTextInput"] [data-baseweb="input"]:focus-within {{
+    border-color: #006633 !important;
+  }}
+  /* Hide the built-in "Press Enter to apply" hint (Apply button instead) */
+  [data-testid="InputInstructions"] {{ display: none; }}
   /* ── After image lightbox ── */
   .cj-after {{ position:relative; display:block; width:100%; }}
   .cj-after > img {{ width:100%; border-radius:8px; display:block; cursor:zoom-in; }}
@@ -1277,30 +1283,6 @@ else:
             unsafe_allow_html=True,
         )
 
-    # ── Text controls (shown when text mode is on) ────────────────────────────
-    if st.session_state.text_mode:
-        st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
-
-        st.markdown(
-            "<p style='font-size:0.68rem;font-weight:700;letter-spacing:0.08em;"
-            "text-transform:uppercase;color:#bbb;margin-bottom:0.3rem;'>Background text</p>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            "<p style='color:#999;font-size:0.82rem;margin:0.2rem 0 0;'>"
-            "Uses the project background artwork as the full-canvas background behind the isolated subject."
-            " To change it for all outputs, place your image at <strong>bg_artwork.png</strong> in the project root."
-            "</p>",
-            unsafe_allow_html=True,
-        )
-        # Background artwork: the app will use `bg_artwork.png` in the project root if present.
-        st.markdown(
-            "<div style='margin-top:0.4rem;color:#666;font-size:0.85rem;'>"
-            "Using project background artwork if available: <strong>bg_artwork.png</strong>."
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
     # ── Description text input ────────────────────────────────────────────────
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
     st.markdown(
@@ -1308,13 +1290,18 @@ else:
         "text-transform:uppercase;color:#aaa;margin-bottom:0.5rem;'>Description</p>",
         unsafe_allow_html=True,
     )
-    st.text_input(
-        "Description text",
-        value=st.session_state.description_text,
-        placeholder="e.g. Premium condition",
-        label_visibility="collapsed",
-        key="description_text",
-    )
+    _desc_col, _apply_col = st.columns([5, 1], vertical_alignment="bottom")
+    with _desc_col:
+        st.text_input(
+            "Description text",
+            value=st.session_state.description_text,
+            placeholder="e.g. Premium condition",
+            label_visibility="collapsed",
+            key="description_text",
+        )
+    with _apply_col:
+        # Clicking blurs the input, which commits its value before the rerun.
+        st.button("Apply", type="primary", use_container_width=True)
 
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
