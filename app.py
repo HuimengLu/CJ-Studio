@@ -1,12 +1,10 @@
 import base64
 import functools
-import http.server
 import io
 import logging
 import math
-import socket
+import os
 import textwrap
-import threading
 import time
 
 import cv2
@@ -1088,9 +1086,11 @@ if "bg_image" not in st.session_state:
 if "description_text" not in st.session_state:
     st.session_state.description_text = ""
 
-# ── Shared nav component ──────────────────────────────────────────────────────
-# Single source of truth for the Streamlit page and the bundled IAAC static page.
-_NAV_SHARED_CSS = """\
+# ── Nav pill — served by Streamlit's built-in static file server ──────────────
+# The IAAC static app lives at static/iaac/ and is served by Streamlit at
+# /app/static/iaac/ (requires enableStaticServing = true in .streamlit/config.toml).
+# The nav pill in index.html is baked in; no separate HTTP server needed.
+_NAV_CSS = """\
 #cj-nav{display:inline-flex;gap:4px;background:#fff;border-radius:8px;padding:4px;
         box-shadow:0 2px 10px rgba(0,0,0,.10)}
 #cj-nav .cj-np{padding:5px 16px;border-radius:6px;border:none;
@@ -1103,67 +1103,12 @@ _NAV_SHARED_CSS = """\
 #cj-nav .cj-np:not(.active):hover{background:#f5f5f5}"""
 
 
-# ── Embedded IAAC HTTP server (same process, correct MIME types) ──────────────
-_IAAC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "iaac")
 
-
-@st.cache_resource(show_spinner=False)
-def _iaac_port() -> int:
-    """Start an embedded HTTP server for the IAAC static app and return its port."""
-
-    _NAV_CSS = (
-        "<style>\n"
-        + _NAV_SHARED_CSS
-        + "\n#cj-nav-wrap{position:fixed;top:14px;left:16px;z-index:99999}"
-        + "\n</style>"
-    )
-
-    _NAV_HTML = (
-        '<div id="cj-nav-wrap"><div id="cj-nav">\n'
-        '  <a class="cj-np" href="http://localhost:8501/">Listing</a>\n'
-        '  <span class="cj-np active">Social</span>\n'
-        "</div></div>"
-    )
-
-    class _Handler(http.server.SimpleHTTPRequestHandler):
-        def __init__(self, *a, **kw):
-            super().__init__(*a, directory=_IAAC_DIR, **kw)
-
-        def log_message(self, *_):
-            pass
-
-        def do_GET(self):
-            if self.path in ("/", "/index.html"):
-                with open(os.path.join(_IAAC_DIR, "index.html"), encoding="utf-8") as f:
-                    html = f.read()
-                html = html.replace("</head>", _NAV_CSS + "\n</head>")
-                html = html.replace("</body>", _NAV_HTML + "\n</body>")
-                body = html.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            else:
-                super().do_GET()
-
-    with socket.socket() as _s:
-        _s.bind(("", 0))
-        _port = _s.getsockname()[1]
-
-    _srv = http.server.HTTPServer(("localhost", _port), _Handler)
-    threading.Thread(target=_srv.serve_forever, daemon=True).start()
-    return _port
-
-
-_IAAC_PORT = _iaac_port()
-
-# ── UI ─────────────────────────────────────────────────────────────────────────
 st.markdown(
-    f"<style>{_NAV_SHARED_CSS}</style>"
+    f"<style>{_NAV_CSS}</style>"
     f'<div id="cj-nav">'
     f'  <span class="cj-np active">Listing</span>'
-    f'  <a class="cj-np" href="http://localhost:{_IAAC_PORT}/">Social</a>'
+    f'  <a class="cj-np" href="/app/static/iaac/index.html">Social</a>'
     f"</div>"
     f"<h2 style='color:{DARK};margin:0 0 1.4rem;font-size:1.85rem;font-weight:700;'>"
     "CJ Listing Formatter</h2>",

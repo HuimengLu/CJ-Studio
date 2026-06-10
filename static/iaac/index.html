@@ -30,9 +30,26 @@
 	<meta name="theme-color" content="#ffffff">
 
 	<link rel="stylesheet" href="bundle/main.css"/>
+	<style>
+	#cj-nav{display:inline-flex;gap:4px;background:#fff;border-radius:8px;padding:4px;
+	        box-shadow:0 2px 10px rgba(0,0,0,.10)}
+	#cj-nav .cj-np{padding:5px 16px;border-radius:6px;border:none;
+	  font-size:.83rem;font-weight:600;cursor:default;background:none;
+	  color:#888 !important;text-decoration:none !important;
+	  display:inline-block;transition:background .15s,color .15s;
+	  font-family:inherit;line-height:1.4}
+	#cj-nav .cj-np.active{background:#FDECEA;color:#E8605A !important}
+	#cj-nav a.cj-np{cursor:pointer;color:#888 !important;text-decoration:none !important}
+	#cj-nav .cj-np:not(.active):hover{background:#f5f5f5}
+	#cj-nav-wrap{position:fixed;top:14px;left:16px;z-index:99999}
+	</style>
 </head>
 
 	<body>
+	<div id="cj-nav-wrap"><div id="cj-nav">
+	  <a class="cj-np" href="/">Listing</a>
+	  <span class="cj-np active">Social</span>
+	</div></div>
 		
 			
 
