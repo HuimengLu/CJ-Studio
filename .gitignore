@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+
+# Real-ESRGAN weights — local-only, not part of the deployed build
+models/

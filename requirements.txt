@@ -6,15 +6,8 @@ Pillow>=10.0.0
 numpy>=1.26.0
 opencv-python-headless>=4.9.0
 
-# Background removal — Python API (no shell calls)
-# Use rembg[gpu] instead if an NVIDIA GPU is available (requires onnxruntime-gpu).
-# Switch model at runtime via: CJ_REMBG_MODEL=isnet-general-use
-rembg>=2.0.50
-onnxruntime>=1.16.0        # CPU inference backend for rembg ONNX models
-
-# rembg transitive deps (pinned here for reproducible Docker builds)
-pymatting>=1.1.8           # alpha matting for soft edge refinement
-scikit-image>=0.21.0       # image utilities used by rembg
-scipy>=1.11.0              # rembg mask post-processing
-pooch>=1.8.0               # model file download + hash verification
-tqdm>=4.65.0               # download progress (shown on first model fetch)
+# Background removal — withoutbg open-source model (Python API, no shell calls)
+# Depth-Anything V2 + ISNet + focus matting/refiner. Weights download once from
+# Hugging Face on first run and are cached locally. https://github.com/withoutbg/withoutbg
+withoutbg>=1.0.3
+onnxruntime>=1.16.0        # CPU inference backend for the ONNX models
