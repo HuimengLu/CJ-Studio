@@ -1162,32 +1162,36 @@ def _detect_rgba_bounds(rgba_array: np.ndarray) -> tuple:
     return (row_indices[0], row_indices[-1] + 1, col_indices[0], col_indices[-1] + 1)
 
 
-def _crop_result(base: Image.Image, ratio: str) -> Image.Image:
-    """Crop the 1600×1600 base canvas to the target aspect ratio (center crop)."""
-    W, H = base.size
-    ar = _RATIO_AR.get(ratio, 1.0)
-    if ar >= 1.0:
-        new_h = int(W / ar)
-        top = (H - new_h) // 2
-        return base.crop((0, top, W, top + new_h))
-    else:
-        new_w = int(H * ar)
-        left = (W - new_w) // 2
-        return base.crop((left, 0, left + new_w, H))
+def _corner_color(img: Image.Image):
+    """Average the four corner pixels — the padding colour, so bars are seamless."""
+    w, h = img.size
+    px = img.load()
+    pts = [(1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2)]
+    cols = [px[x, y] for x, y in pts]
+    n = len(cols[0]) if isinstance(cols[0], tuple) else 1
+    if n == 1:
+        return int(round(sum(cols) / len(cols)))
+    return tuple(int(round(sum(c[i] for c in cols) / len(cols))) for i in range(n))
 
 
-def _crop_before(pil_img: Image.Image, ratio: str) -> Image.Image:
-    """Center-crop the original photo to match the target aspect ratio."""
-    w, h = pil_img.size
+def _fit_to_ratio(img: Image.Image, ratio: str) -> Image.Image:
+    """Pad img with its own background colour to the target aspect ratio.
+
+    Never crops: for a wider target we add left/right bars, for a taller one we
+    add top/bottom bars, so the subject and any text overlay stay fully visible.
+    """
+    W, H = img.size
     ar = _RATIO_AR.get(ratio, 1.0)
-    if w / h >= ar:
-        new_w = int(h * ar)
-        x0 = (w - new_w) // 2
-        return pil_img.crop((x0, 0, x0 + new_w, h))
-    else:
-        new_h = int(w / ar)
-        y0 = (h - new_h) // 2
-        return pil_img.crop((0, y0, w, y0 + new_h))
+    cur = W / float(H)
+    if abs(cur - ar) < 1e-3:
+        return img
+    if ar > cur:                      # need wider → pad left/right
+        new_w, new_h = int(round(H * ar)), H
+    else:                             # need taller → pad top/bottom
+        new_w, new_h = W, int(round(W / ar))
+    canvas = Image.new(img.mode, (new_w, new_h), _corner_color(img))
+    canvas.paste(img, ((new_w - W) // 2, (new_h - H) // 2))
+    return canvas
 
 
 # ── session state ──────────────────────────────────────────────────────────────
@@ -1519,7 +1523,7 @@ _RESULT_CSS = """\
 .st-key-cj_apply button:hover{opacity:.9 !important;background:#191c1d !important;color:#fff !important}
 .st-key-cj_desc:has(input:placeholder-shown) .st-key-cj_apply{display:none !important}
 /* footer: pad 49/48/48 border-t; Export py-16 black; Try py-17 border #7e7576; 14/20 semibold 1.4px */
-.cj-foot{padding:49px 48px 48px;border-top:1px solid #cfc4c5;display:flex;flex-direction:column;gap:16px}
+.cj-foot{padding:48px;border-top:1px solid #cfc4c5;display:flex;flex-direction:column;gap:16px}
 .cj-btn-primary,.cj-btn-outline{display:block;text-align:center;text-decoration:none !important;
   font-family:'Hanken Grotesk',sans-serif;font-size:14px;line-height:20px;font-weight:600;
   letter-spacing:1.4px;text-transform:uppercase;cursor:pointer;border-radius:0}
@@ -1699,14 +1703,14 @@ def _strip_html() -> str:
 
 
 if _VIEW == "social":
+    # Social Media Generator module (social.py) inside the same app shell.
     st.markdown(
-        f"<style>{_NAV_CSS}\n"
-        ".block-container{max-width:100% !important;"
-        "padding-top:1.2rem !important;padding-bottom:0.5rem !important}</style>"
-        + _nav_pill("social"),
+        f"<style>{_SHELL_CSS}</style>" + _sidebar_html("social"),
         unsafe_allow_html=True,
     )
-    components.html(_iaac_component_html(), height=860, scrolling=True)
+    import social
+
+    social.render()
     st.stop()
 
 # ── Listing view shell (fixed left sidebar) ────────────────────────────────────
@@ -1767,18 +1771,19 @@ else:
     _t_rebuild = time.perf_counter()
     _base_result = st.session_state.result
     _caption = st.session_state.applied_description if st.session_state.text_mode else ""
+    # Compose the full 1:1 square (which the user has confirmed never clips), draw the
+    # caption on it, THEN pad out to the target ratio — so nothing is ever cropped.
     if st.session_state.text_mode:
         _t0 = time.perf_counter()
-        _display_result = apply_text_overlay(
-            _base_result, st.session_state.ratio, _caption
-        )
+        _square = apply_text_overlay(_base_result, "1:1", _caption)
         log.info("PERF apply_text_overlay: %.0f ms", (time.perf_counter() - _t0) * 1000)
     else:
-        _display_result = _base_result
+        _square = _base_result
 
-    _after = _crop_result(_display_result, st.session_state.ratio)
     if _caption.strip():
-        _after = _add_description_text(_after, _caption.strip())
+        _square = _add_description_text(_square, _caption.strip())
+
+    _after = _fit_to_ratio(_square, st.session_state.ratio)
 
     _t0 = time.perf_counter()
     _png_bytes = _to_png_bytes(_after)
@@ -1789,7 +1794,7 @@ else:
     _bcache = st.session_state.setdefault("_before_cache", {})
     _before_url = _bcache.get(st.session_state.ratio)
     if _before_url is None:
-        _before = _crop_before(st.session_state.original, st.session_state.ratio)
+        _before = _fit_to_ratio(st.session_state.original, st.session_state.ratio)
         _before_url = f"data:image/png;base64,{base64.b64encode(_to_png_bytes(_before)).decode()}"
         _bcache[st.session_state.ratio] = _before_url
     log.info(
