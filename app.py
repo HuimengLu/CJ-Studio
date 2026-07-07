@@ -7,6 +7,7 @@ import math
 import os
 import textwrap
 import time
+import zipfile
 
 import cv2
 import numpy as np
@@ -1195,9 +1196,25 @@ def _fit_to_ratio(img: Image.Image, ratio: str) -> Image.Image:
 
 
 # ── session state ──────────────────────────────────────────────────────────────
+# Each uploaded photo is an independent record in st.session_state.photos; its
+# per-image edit state (ratio / text overlay / caption) lives in the record, so
+# editing one photo never touches another. `active` is the index shown on the
+# result screen. The singular keys below (ratio, text_mode, subject_rgba …) are
+# the *active mirror*: they reflect the active photo so the existing rendering
+# pipeline (make_listing / apply_text_overlay) works unchanged.
 for _k in ("original", "result", "warn", "subject_mask", "subject_rgba"):
     if _k not in st.session_state:
         st.session_state[_k] = None
+if "photos" not in st.session_state:
+    st.session_state.photos = []          # list[dict] — see _new_photo()
+if "active" not in st.session_state:
+    st.session_state.active = 0
+if "show_export" not in st.session_state:
+    st.session_state.show_export = False
+if "export_sel" not in st.session_state:
+    st.session_state.export_sel = set()   # indices selected in the export modal
+if "confirm_delete" not in st.session_state:
+    st.session_state.confirm_delete = None   # photo index pending delete confirm
 if "ratio" not in st.session_state:
     st.session_state.ratio = "1:1"
 if "text_mode" not in st.session_state:
@@ -1222,16 +1239,152 @@ if "applied_description" not in st.session_state:
     st.session_state.applied_description = ""
 
 
+# ── Per-photo records ──────────────────────────────────────────────────────────
+def _new_photo(name, original, result, subject_rgba, subject_mask):
+    """Build one photo record. Edit state defaults to the current active mirror
+    so a newly added photo inherits the last-used ratio, matching user intent."""
+    return {
+        "name": name,
+        "original": original,
+        "result": result,
+        "subject_rgba": subject_rgba,
+        "subject_mask": subject_mask,
+        "ratio": st.session_state.get("ratio", "1:1"),
+        "text_mode": False,
+        "applied_description": "",
+        "description_text": "",
+    }
+
+
+def _active_photo():
+    photos = st.session_state.photos
+    if not photos:
+        return None
+    i = min(st.session_state.active, len(photos) - 1)
+    return photos[i]
+
+
+def _sync_active_mirror(p):
+    """Point the singular pipeline keys + widget-bound keys at photo `p`."""
+    st.session_state.ratio = p["ratio"]
+    st.session_state.text_mode = p["text_mode"]
+    st.session_state.cj_txt = p["text_mode"]
+    st.session_state.description_text = p["description_text"]
+    st.session_state.applied_description = p["applied_description"]
+    st.session_state.subject_rgba = p["subject_rgba"]
+    st.session_state.subject_mask = p["subject_mask"]
+
+
 # ── Widget callbacks — mutate state *before* the rerun so the canvas at the top
 #    of the result screen recomputes exactly once (no wasted extra rerun). ───────
+def _activate(i):
+    """Switch the active photo, saving the current caption draft first."""
+    photos = st.session_state.photos
+    cur = _active_photo()
+    if cur is not None:
+        cur["description_text"] = st.session_state.get("description_text", "")
+    st.session_state.active = max(0, min(i, len(photos) - 1))
+    _sync_active_mirror(photos[st.session_state.active])
+
 def _pick_ratio(r):
     st.session_state.ratio = r
+    p = _active_photo()
+    if p is not None:
+        p["ratio"] = r
 
 def _sync_text_mode():
     st.session_state.text_mode = st.session_state.cj_txt
+    p = _active_photo()
+    if p is not None:
+        p["text_mode"] = st.session_state.cj_txt
 
 def _apply_caption():
     st.session_state.applied_description = st.session_state.description_text
+    p = _active_photo()
+    if p is not None:
+        p["applied_description"] = st.session_state.description_text
+        p["description_text"] = st.session_state.description_text
+
+def _reset_photos():
+    st.session_state.photos = []
+    st.session_state.active = 0
+    st.session_state.warn = None
+    st.session_state.result = None
+
+def _ask_delete(i):
+    st.session_state.confirm_delete = i
+
+def _delete_photo(i):
+    """Remove photo i and repoint the active index / mirror."""
+    photos = st.session_state.photos
+    if not (0 <= i < len(photos)):
+        return
+    photos.pop(i)
+    if not photos:
+        _reset_photos()
+        return
+    a = st.session_state.active
+    if i < a:
+        a -= 1
+    a = max(0, min(a, len(photos) - 1))
+    st.session_state.active = a
+    st.session_state._before_cache = {}   # cache keys are index-based
+    _sync_active_mirror(photos[a])
+
+def _open_export():
+    st.session_state.show_export = True
+    st.session_state.export_sel = set(range(len(st.session_state.photos)))
+
+def _toggle_export(i):
+    sel = st.session_state.export_sel
+    sel.discard(i) if i in sel else sel.add(i)
+
+
+def _compose_photo(p) -> Image.Image:
+    """Render a photo record to its final image at its own ratio + text state.
+
+    apply_text_overlay / _add_description_text read the subject arrays from the
+    singular session keys, so point those at `p` first. Safe because Streamlit
+    runs one script pass at a time per session.
+    """
+    st.session_state["subject_rgba"] = p["subject_rgba"]
+    st.session_state["subject_mask"] = p["subject_mask"]
+    base = p["result"]
+    caption = p["applied_description"] if p["text_mode"] else ""
+    if p["text_mode"]:
+        square = apply_text_overlay(base, "1:1", caption)
+    else:
+        square = base
+    if caption.strip():
+        square = _add_description_text(square, caption.strip())
+    return _fit_to_ratio(square, p["ratio"])
+
+
+def _process_one(f):
+    """Run make_listing on one uploaded file and append a photo record.
+
+    make_listing writes the subject arrays into session_state; capture them
+    immediately after the call so every photo keeps its own copy.
+    Returns a warning string on failure, None on success.
+    """
+    try:
+        f.seek(0)
+        pil_img = ImageOps.exif_transpose(Image.open(f))
+    except Exception as exc:
+        return f"{getattr(f, 'name', 'image')}: could not open ({exc})."
+    result, warn = make_listing(pil_img)
+    if warn:
+        return f"{getattr(f, 'name', 'image')}: {warn}"
+    st.session_state.photos.append(_new_photo(
+        getattr(f, "name", "photo"), pil_img, result,
+        st.session_state.subject_rgba, st.session_state.subject_mask,
+    ))
+    return None
+
+
+def _process_files(files) -> None:
+    warnings = [w for w in (_process_one(f) for f in files) if w]
+    st.session_state.warn = "  ".join(warnings) if warnings else None
 
 # ── Nav pill + view router ─────────────────────────────────────────────────────
 # Both tools run on this single Streamlit server, so the app works when
@@ -1411,17 +1564,27 @@ _RESULT_CSS = """\
 [data-testid="stMainBlockContainer"]>[data-testid="stVerticalBlockBorderWrapper"]
   >[data-testid="stVerticalBlock"]{gap:0 !important;height:100vh !important}
 @ROW@{gap:0 !important;align-items:stretch !important;height:100vh !important;
-  min-height:0;margin-left:256px}
+  min-height:0;margin-left:256px;flex-wrap:nowrap !important}
 /* panel scrolls internally if its own content ever exceeds the viewport */
 @PANEL@ [data-testid="stVerticalBlockBorderWrapper"]{overflow-y:auto}
-@CANVAS@{flex:1 1 auto !important;width:auto !important;min-width:0}
+/* flex-basis 0 (not auto): a wide filmstrip must never set the column's size,
+   otherwise the row wraps and the panel drops below the canvas */
+@CANVAS@{flex:1 1 0% !important;width:auto !important;min-width:0}
 @PANEL@{flex:0 0 384px !important;width:384px !important;min-width:384px !important}
 /* canvas column stretches to the row (align-items:stretch); the inner chain
    fills that height. NB: don't set height on the column itself — a resolved
    percentage height there cancels the stretch and collapses it. */
 @CANVAS@ [data-testid="stVerticalBlockBorderWrapper"],
-@CANVAS@ [data-testid="stVerticalBlock"],
-@CANVAS@ [data-testid="stElementContainer"]{height:100% !important;min-height:0}
+@CANVAS@ [data-testid="stVerticalBlock"]{height:100% !important;min-height:0}
+/* cj_canvas is a flex column: stage (before/after, flex) + filmstrip (auto) */
+@CANVAS@ .st-key-cj_canvas{display:flex !important;flex-direction:column !important;gap:0 !important}
+@CANVAS@ [data-testid="stVerticalBlockBorderWrapper"]:has(>.st-key-cj_stage){
+  flex:1 1 auto !important;min-height:0}
+@CANVAS@ [data-testid="stVerticalBlockBorderWrapper"]:has(>.st-key-cj_film){
+  flex:0 0 auto !important;height:auto !important}
+@CANVAS@ .st-key-cj_stage{height:100% !important;min-height:0;position:relative}
+@CANVAS@ .st-key-cj_stage [data-testid="stElementContainer"]{height:auto !important}
+@CANVAS@ .st-key-cj_stage [data-testid="stElementContainer"]:has(iframe){height:100% !important;min-height:0}
 @CANVAS@ iframe{height:100% !important;border:none;display:block;width:100%}
 /* ===== edit panel (RIGHT) — Figma 182:544 / 182:605, pixel-exact, nested ===== */
 /* height chain: column (stretched to the row) → card, so it fills the viewport */
@@ -1533,15 +1696,14 @@ _RESULT_CSS = """\
   color:#000 !important;border:1px solid #7e7576;padding:17px 1px}
 .cj-btn-outline:hover{background:#f8f9fa;color:#000 !important}
 /* ===== loading overlay: shows over the canvas whenever a rerun is running ===== */
-.st-key-cj_canvas{position:relative}
 /* Streamlit makes every stElementContainer position:relative, so the overlay would
    anchor to its own (below-the-iframe) container. Pull that container out of flow and
-   pin it over cj_canvas so the overlay lands exactly on the image. */
-.st-key-cj_canvas>[data-testid="stElementContainer"]:has(.cj-loading-overlay){
+   pin it over cj_stage so the overlay lands exactly on the image. */
+.st-key-cj_stage>[data-testid="stElementContainer"]:has(.cj-loading-overlay){
   position:absolute !important;inset:0 !important;margin:0 !important;height:auto !important;
   z-index:30;pointer-events:none !important}
 /* only capture pointer events while a rerun is running, so the idle slider/buttons work */
-[data-test-script-state="running"] .st-key-cj_canvas>[data-testid="stElementContainer"]:has(.cj-loading-overlay){
+[data-test-script-state="running"] .st-key-cj_stage>[data-testid="stElementContainer"]:has(.cj-loading-overlay){
   pointer-events:auto !important}
 .cj-loading-overlay{position:absolute;inset:0;z-index:30;display:flex;
   align-items:center;justify-content:center;background:rgba(255,255,255,.2);
@@ -1550,7 +1712,7 @@ _RESULT_CSS = """\
 [data-testid="stApp"][data-test-script-state="rerunRequested"] .cj-loading-overlay{
   opacity:1 !important;visibility:visible !important;pointer-events:auto}
 /* keep the canvas + overlay containers un-dimmed while Streamlit marks them stale */
-[data-test-script-state="running"] .st-key-cj_canvas>[data-testid="stElementContainer"]{
+[data-test-script-state="running"] .st-key-cj_stage>[data-testid="stElementContainer"]{
   opacity:1 !important}
 /* frying-pan + egg loader (user-provided) */
 .loader{--color-1:#3e494d;--color-2:#5d6063;--color-3:#6c4924;--color-4:#4b2d21;
@@ -1605,6 +1767,131 @@ _RESULT_CSS = """\
     '[data-testid="stHorizontalBlock"]:has(.cj-panel-head)>[data-testid="stColumn"]:last-child',
 )
 
+# ── Multi-photo extras: filmstrip, add-more tile, footer buttons ───────────────
+_MULTI_CSS = """\
+/* filmstrip bar under the before/after view — fixed to the column width; when
+   the tiles overflow it scrolls horizontally instead of growing the layout */
+[data-testid="stVerticalBlockBorderWrapper"]:has(>.st-key-cj_film){
+  flex:0 0 auto !important;height:auto !important;min-width:0 !important;
+  max-width:100% !important;overflow:hidden}
+.st-key-cj_film{border-top:1px solid #cfc4c5;background:#f8f9fa;
+  padding:16px 24px !important;display:flex !important;flex-direction:row !important;
+  flex-wrap:nowrap !important;gap:12px !important;align-items:center !important;
+  overflow-x:auto !important;height:auto !important;
+  width:100% !important;min-width:0 !important;max-width:100% !important}
+.st-key-cj_film::-webkit-scrollbar{height:6px}
+.st-key-cj_film::-webkit-scrollbar-track{background:transparent}
+.st-key-cj_film::-webkit-scrollbar-thumb{background:#cfc4c5;border-radius:3px}
+.st-key-cj_film>[data-testid="stElementContainer"],
+.st-key-cj_film>[data-testid="stVerticalBlockBorderWrapper"]{width:auto !important;
+  flex:0 0 auto !important;height:auto !important;margin:0 !important;min-width:0}
+/* per-photo wrapper: relative anchor for the hover delete button */
+[class*="st-key-cj_tw_"]{position:relative;gap:0 !important;padding:0 !important}
+[class*="st-key-cj_tw_"]>[data-testid="stElementContainer"]{margin:0 !important;width:auto !important}
+/* thumbnails = square buttons painted with the enhanced result; hover matches
+   the Output Ratio cards (border darkens to #7e7576) */
+[class*="st-key-cj_thumb_"] button{width:72px !important;height:72px !important;
+  min-height:72px !important;padding:0 !important;border-radius:2px !important;
+  border:1px solid #cfc4c5 !important;background-size:cover !important;
+  background-position:center !important;background-repeat:no-repeat !important;
+  color:transparent !important;filter:grayscale(1);opacity:.65;
+  transition:opacity .15s,filter .15s,border-color .15s}
+[class*="st-key-cj_tw_"]:hover [class*="st-key-cj_thumb_"] button{
+  opacity:1;filter:none;border-color:#7e7576 !important}
+[class*="st-key-cj_thumb_"] button p{display:none}
+/* delete affordance: ✕ chip in the tile's top-right corner, shown on hover;
+   clicking it opens the confirm dialog */
+[class*="st-key-cj_delbtn_"]{position:absolute !important;top:3px;right:3px;z-index:6;
+  margin:0 !important;width:auto !important;opacity:0;pointer-events:none;
+  transition:opacity .15s}
+[class*="st-key-cj_tw_"]:hover [class*="st-key-cj_delbtn_"]{opacity:1;pointer-events:auto}
+[class*="st-key-cj_delbtn_"] button{width:20px !important;height:20px !important;
+  min-height:20px !important;padding:0 !important;border-radius:50% !important;
+  border:1px solid #cfc4c5 !important;background:#fff !important;color:#1b1b1b !important;
+  display:flex !important;align-items:center !important;justify-content:center !important;
+  box-shadow:0 1px 3px rgba(0,0,0,.25);line-height:1 !important}
+[class*="st-key-cj_delbtn_"] button:hover{background:#1b1b1b !important;color:#fff !important}
+[class*="st-key-cj_delbtn_"] button p{font-size:11px !important;line-height:1 !important;
+  font-weight:600 !important}
+/* pending tiles: freshly added photos processing in place, spinner overlay */
+.cj-pend-row{display:flex;gap:12px}
+.cj-pend{position:relative;width:72px;height:72px;flex:0 0 auto;
+  border:1px solid #cfc4c5;border-radius:2px;background:#e7e8e9;
+  background-size:cover;background-position:center}
+.cj-pend.dim{opacity:.5}
+.cj-pend.spin::before{content:"";position:absolute;inset:0;background:rgba(255,255,255,.5)}
+.cj-pend.spin::after{content:"";position:absolute;top:50%;left:50%;width:18px;height:18px;
+  margin:-10px 0 0 -10px;border:2px solid #cfc4c5;border-top-color:#1b1b1b;
+  border-radius:50%;animation:cjspin .8s linear infinite}
+@keyframes cjspin{to{transform:rotate(360deg)}}
+/* add-more tile = compact uploader styled as a dashed "+" square */
+[class*="st-key-cj_more_"]{width:auto !important;flex:0 0 auto !important;margin:0 !important}
+[class*="st-key-cj_more_"] [data-testid="stFileUploader"]{border:none !important;
+  background:transparent !important;padding:0 !important;margin:0 !important;width:72px}
+[class*="st-key-cj_more_"] [data-testid="stFileUploader"]>label{display:none}
+[class*="st-key-cj_more_"] section[data-testid="stFileUploaderDropzone"]{
+  width:72px;height:72px;min-height:72px;padding:0 !important;border:1.5px dashed #cfc4c5;
+  border-radius:2px;background:#fff;display:flex !important;align-items:center !important;
+  justify-content:center !important;overflow:hidden;transition:border-color .15s}
+[class*="st-key-cj_more_"] section[data-testid="stFileUploaderDropzone"]:hover{border-color:#1b1b1b}
+[class*="st-key-cj_more_"] [data-testid="stFileUploaderDropzoneInstructions"]{margin:0 !important;
+  display:flex !important;flex-direction:column !important;align-items:center !important}
+[class*="st-key-cj_more_"] [data-testid="stFileUploaderDropzoneInstructions"]>*{display:none !important}
+[class*="st-key-cj_more_"] [data-testid="stFileUploaderDropzoneInstructions"]::before{
+  content:"+";font-family:'Hanken Grotesk',sans-serif;font-size:32px;font-weight:300;
+  line-height:1;color:#5d5e66}
+[class*="st-key-cj_more_"] section[data-testid="stFileUploaderDropzone"]>button{
+  position:absolute !important;inset:0;width:100% !important;height:100% !important;
+  margin:0 !important;padding:0 !important;border:none !important;background:transparent !important;
+  color:transparent !important;opacity:0;cursor:pointer}
+/* the uploader's own file chips would stack under the + tile — pending tiles
+   in the strip replace them, so hide the chips entirely */
+[class*="st-key-cj_more_"] [data-testid="stFileUploaderFile"],
+[class*="st-key-cj_more_"] [data-testid="stFileUploaderPagination"],
+[class*="st-key-cj_more_"] [data-testid="stFileUploaderDeleteBtn"]{display:none !important}
+/* footer buttons (replace the old HTML anchors) */
+.st-key-cj_foot{padding:48px;border-top:1px solid #cfc4c5;display:flex !important;
+  flex-direction:column !important;gap:16px !important}
+.st-key-cj_foot [data-testid="stElementContainer"]{width:100% !important;margin:0 !important}
+.st-key-cj_foot button,.st-key-cj_foot [data-testid="stDownloadButton"] button{
+  width:100% !important;border-radius:0 !important;font-family:'Hanken Grotesk',sans-serif !important;
+  font-size:14px !important;font-weight:600 !important;letter-spacing:1.4px !important;
+  text-transform:uppercase !important;padding:16px !important;border:none !important}
+.st-key-cj_export_all button,.st-key-cj_export_one button{background:#000 !important;color:#fff !important}
+.st-key-cj_export_all button:hover,.st-key-cj_export_one button:hover{opacity:.9;background:#000 !important;color:#fff !important}
+.st-key-cj_tryanother button{background:transparent !important;color:#000 !important;
+  border:1px solid #7e7576 !important;padding:17px 1px !important}
+.st-key-cj_tryanother button:hover{background:#f8f9fa !important;color:#000 !important}
+.st-key-cj_foot button p{font-size:14px !important;font-weight:600 !important;letter-spacing:1.4px !important}
+"""
+
+# ── Export selection modal styling (Figma 233:833 grid) ────────────────────────
+_EXPORT_CSS = """\
+[class*="st-key-cj_ex_"]{position:relative}
+.cj-ex-tile{position:relative;aspect-ratio:1/1;border-radius:2px;overflow:hidden;
+  border:1px solid #cfc4c5;background:#e1e3e4}
+.cj-ex-tile.sel{border:2px solid #000}
+.cj-ex-tile img{width:100%;height:100%;object-fit:cover;opacity:.7;transition:opacity .15s}
+.cj-ex-tile.sel img{opacity:1}
+.cj-ex-check{position:absolute;top:8px;right:8px;width:20px;height:20px;
+  border-radius:50%;background:rgba(248,249,250,.7);border:1.5px solid #7e7576;
+  box-sizing:border-box}
+.cj-ex-check.on{background:#000;border-color:#000}
+.cj-ex-check.on::after{content:"";position:absolute;left:6px;top:2.5px;
+  width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;
+  transform:rotate(45deg)}
+/* invisible pick button stretched over each tile */
+[class*="st-key-cj_exbtn_"]{position:absolute !important;inset:0 !important;z-index:5;margin:0 !important}
+[class*="st-key-cj_exbtn_"] button{width:100% !important;height:100% !important;
+  opacity:0 !important;cursor:pointer;background:transparent !important;border:none !important;
+  min-height:0 !important}
+.st-key-cj_ex_actions [data-testid="stButton"] button,
+.st-key-cj_ex_actions [data-testid="stDownloadButton"] button{width:100% !important;
+  border-radius:0 !important;text-transform:uppercase;letter-spacing:1.2px;font-weight:600}
+.st-key-cj_ex_go button{background:#000 !important;color:#fff !important;border:none !important}
+.st-key-cj_ex_go button:hover{opacity:.9;background:#000 !important;color:#fff !important}
+"""
+
 
 def _sidebar_html(active: str = "upload") -> str:
     def _item(href: str, icon: str, label: str, is_active: bool) -> str:
@@ -1636,28 +1923,49 @@ def _sidebar_html(active: str = "upload") -> str:
     )
 
 
-# ── In-place processing card (replaces the drop zone while a photo processes) ──
+# ── In-place processing card (replaces the drop zone while photos process) ─────
+# Square corners throughout (border-radius 0); one row per uploaded image with
+# its own progress line; the batch header shows overall progress. The row list
+# height is capped so many images scroll inside the card instead of growing it.
 _PROC_CSS = """\
-.cj-proc{position:relative;border:1px solid #cfc4c5;border-radius:12px;background:#fff;
-  min-height:380px;display:flex;flex-direction:column;justify-content:center;gap:16px;padding:1.5rem}
+.cj-proc{position:relative;border:1px solid #cfc4c5;border-radius:0;background:#fff;
+  min-height:380px;display:flex;flex-direction:column;justify-content:center;gap:16px;
+  padding:1.5rem 1.5rem 3.2rem}
 .cj-proc-cancel,.cj-proc-cancel:link,.cj-proc-cancel:visited{position:absolute;left:0;right:0;
   bottom:20px;text-align:center;font-family:'Hanken Grotesk',sans-serif;font-size:12px;
   color:#9a9a9a !important;text-decoration:underline !important;text-underline-offset:2px}
 .cj-proc-cancel:hover{color:#5d5e66 !important}
+.cj-proc-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding-bottom:12px;border-bottom:1px solid #e7e8e9}
+.cj-proc-head-label{font-family:'Hanken Grotesk',sans-serif;font-size:14px;font-weight:600;
+  color:#1b1b1b}
+.cj-proc-head-pct{font-family:'Hanken Grotesk',sans-serif;font-size:12px;color:#5d5e66}
+.cj-proc-head-track{width:100%;height:2px;background:#e1e3e4;position:relative;
+  overflow:hidden;margin-top:10px}
+.cj-proc-head-fill{position:absolute;top:0;left:0;height:100%;background:#1b1b1b;
+  transition:width .4s ease}
+.cj-proc-list{display:flex;flex-direction:column;gap:12px;overflow-y:auto;
+  max-height:300px;padding-right:4px}
 .cj-proc-row{display:flex;align-items:center;gap:16px;border:1px solid #cfc4c5;
-  border-radius:8px;padding:16px}
-.cj-proc-thumb{width:64px;height:64px;flex-shrink:0;border-radius:8px;object-fit:cover;
+  border-radius:0;padding:14px 16px;flex-shrink:0}
+.cj-proc-row.done{opacity:.55}
+.cj-proc-row.waiting{opacity:.45}
+.cj-proc-thumb{width:48px;height:48px;flex-shrink:0;border-radius:0;object-fit:cover;
   filter:grayscale(1);opacity:.6}
+.cj-proc-thumb-ph{width:48px;height:48px;flex-shrink:0;background:#e7e8e9}
 .cj-proc-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
 .cj-proc-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .cj-proc-name{font-family:'Hanken Grotesk',sans-serif;font-size:14px;font-weight:600;
   color:#1b1b1b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cj-proc-status{font-family:'Hanken Grotesk',sans-serif;font-size:12px;color:#5d5e66;
-  white-space:nowrap;animation:cjpulse 1.4s ease-in-out infinite}
+  white-space:nowrap}
+.cj-proc-row.active .cj-proc-status{animation:cjpulse 1.4s ease-in-out infinite}
 @keyframes cjpulse{0%,100%{opacity:1}50%{opacity:.45}}
 .cj-proc-track{width:100%;height:2px;background:#e1e3e4;position:relative;overflow:hidden}
-.cj-proc-fill{position:absolute;top:0;left:0;height:100%;background:#1b1b1b;width:0;
-  animation:cjfill 8s cubic-bezier(.2,.7,.2,1) forwards}
+.cj-proc-fill{position:absolute;top:0;left:0;height:100%;background:#1b1b1b;width:0}
+.cj-proc-row.active .cj-proc-fill{animation:cjfill 8s cubic-bezier(.2,.7,.2,1) forwards}
+.cj-proc-row.done .cj-proc-fill{width:100%}
+.cj-proc-row.waiting .cj-proc-fill{width:6%}
 @keyframes cjfill{0%{width:0}100%{width:92%}}"""
 
 
@@ -1669,22 +1977,59 @@ def _thumb_data_url(pil_img: Image.Image) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def _processing_card_html(name: str, thumb_url: str) -> str:
-    """Single-file progress card shown in place of the drop zone.
+def _processing_card_html(names: list, thumbs: list, active: int) -> str:
+    """Batch progress card shown in place of the drop zone.
 
-    (With one photo there is no batch-progress row — just this file's bar.)
+    One row per uploaded image — done rows show a full bar, the active row an
+    animated one, waiting rows a stub. The row list scrolls inside the card
+    when there are more images than fit (the card itself keeps its size).
     """
+    n = len(names)
+    pct = round(active / n * 100)
+    rows = []
+    for i, (name, thumb) in enumerate(zip(names, thumbs)):
+        state = "done" if i < active else ("active" if i == active else "waiting")
+        status = {"done": "Done", "active": "Optimizing&hellip;",
+                  "waiting": "Waiting&hellip;"}[state]
+        img = (f"<img class='cj-proc-thumb' src='{thumb}'/>" if thumb
+               else "<div class='cj-proc-thumb-ph'></div>")
+        rows.append(
+            f"<div class='cj-proc-row {state}'>{img}"
+            "<div class='cj-proc-body'><div class='cj-proc-top'>"
+            f"<span class='cj-proc-name'>{name}</span>"
+            f"<span class='cj-proc-status'>{status}</span></div>"
+            "<div class='cj-proc-track'><div class='cj-proc-fill'></div></div>"
+            "</div></div>"
+        )
+    head = ""
+    if n > 1:
+        head = (
+            "<div><div class='cj-proc-head'>"
+            "<span class='cj-proc-head-label'>Batch Progress</span>"
+            f"<span class='cj-proc-head-pct'>{pct}%</span></div>"
+            "<div class='cj-proc-head-track'>"
+            f"<div class='cj-proc-head-fill' style='width:{pct}%'></div></div></div>"
+        )
     return (
-        "<div class='cj-proc'><div class='cj-proc-row'>"
-        f"<img class='cj-proc-thumb' src='{thumb_url}'/>"
-        "<div class='cj-proc-body'><div class='cj-proc-top'>"
-        f"<span class='cj-proc-name'>{name}</span>"
-        "<span class='cj-proc-status'>Optimizing&hellip;</span></div>"
-        "<div class='cj-proc-track'><div class='cj-proc-fill'></div></div>"
-        "</div></div>"
+        f"<div class='cj-proc'>{head}"
+        f"<div class='cj-proc-list'>{''.join(rows)}</div>"
         "<a class='cj-proc-cancel' href='/' target='_self'>Cancel</a>"
         "</div>"
     )
+
+
+def _pending_tiles_html(urls: list, active: int) -> str:
+    """Filmstrip tiles for photos still processing (added via the + tile).
+
+    Tiles before `active` are done (plain), `active` shows a spinner overlay,
+    later ones wait dimmed. Rendered into a st.empty slot inside the strip.
+    """
+    tiles = []
+    for k, u in enumerate(urls):
+        cls = "" if k < active else (" spin" if k == active else " dim")
+        style = f" style=\"background-image:url('{u}')\"" if u else ""
+        tiles.append(f"<div class='cj-pend{cls}'{style}></div>")
+    return "<div class='cj-pend-row'>" + "".join(tiles) + "</div>"
 
 
 def _strip_html() -> str:
@@ -1720,7 +2065,7 @@ st.markdown(
 )
 
 # ── upload screen (homepage) ────────────────────────────────────────────────────
-if st.session_state.result is None:
+if not st.session_state.photos:
     st.markdown(
         f"<style>{_HOME_EXTRA_CSS}{_PROC_CSS}</style><div class='cj-home-top'></div>",
         unsafe_allow_html=True,
@@ -1733,47 +2078,67 @@ if st.session_state.result is None:
         )
 
     # The drop zone lives in its own slot so it can be swapped, in place, for the
-    # progress card while the photo processes — no loading UI anywhere else.
+    # progress card while the photos process — no loading UI anywhere else.
     drop_slot = st.empty()
     with drop_slot.container():
         uploaded = st.file_uploader(
             "Drop photo here",
             type=["jpg", "jpeg", "png", "webp"],
+            accept_multiple_files=True,
             label_visibility="collapsed",
         )
 
     st.markdown(_strip_html(), unsafe_allow_html=True)
 
-    if uploaded is not None:
-        pil_img = ImageOps.exif_transpose(Image.open(uploaded))
+    if uploaded:
+        # Replace the drop zone with the batch progress card. Thumbnails for
+        # every file render up front; the card re-renders in place before each
+        # file so its row flips waiting → optimizing → done as the batch runs.
+        _names, _thumbs = [], []
+        for _f in uploaded:
+            _names.append(getattr(_f, "name", "photo"))
+            try:
+                _f.seek(0)
+                _thumbs.append(_thumb_data_url(ImageOps.exif_transpose(Image.open(_f))))
+            except Exception:
+                _thumbs.append(None)
 
-        # Replace the drop zone with the in-place progress bar, then process.
-        drop_slot.markdown(
-            _processing_card_html(uploaded.name, _thumb_data_url(pil_img)),
-            unsafe_allow_html=True,
-        )
-        result, warn = make_listing(pil_img)
+        _warnings = []
+        for _i, _f in enumerate(uploaded):
+            drop_slot.markdown(
+                _processing_card_html(_names, _thumbs, _i),
+                unsafe_allow_html=True,
+            )
+            _w = _process_one(_f)
+            if _w:
+                _warnings.append(_w)
+        st.session_state.warn = "  ".join(_warnings) if _warnings else None
 
-        if warn:
-            st.session_state.warn = warn
-            st.rerun()
+        if not st.session_state.photos:
+            st.rerun()            # everything failed — show the warning, stay here
         else:
-            st.session_state.original = pil_img
-            st.session_state.result = result
-            st.session_state.warn = None
+            st.session_state.active = 0
             st.session_state.animate = True   # play before→after reveal once
             st.session_state._before_cache = {}   # invalidate cached before images
+            _sync_active_mirror(st.session_state.photos[0])
             st.rerun()
 
 # ── result screen ──────────────────────────────────────────────────────────────
 else:
-    # ── Build the current before / after images from session state ────────────
+    # Keep the active index + mirror valid (e.g. after a reset elsewhere).
+    st.session_state.active = min(st.session_state.active,
+                                  len(st.session_state.photos) - 1)
+    _photo = _active_photo()
+
+    # ── Build the current before / after images for the active photo ──────────
     _t_rebuild = time.perf_counter()
-    _base_result = st.session_state.result
-    _caption = st.session_state.applied_description if st.session_state.text_mode else ""
+    _base_result = _photo["result"]
+    st.session_state["subject_rgba"] = _photo["subject_rgba"]
+    st.session_state["subject_mask"] = _photo["subject_mask"]
+    _caption = _photo["applied_description"] if _photo["text_mode"] else ""
     # Compose the full 1:1 square (which the user has confirmed never clips), draw the
     # caption on it, THEN pad out to the target ratio — so nothing is ever cropped.
-    if st.session_state.text_mode:
+    if _photo["text_mode"]:
         _t0 = time.perf_counter()
         _square = apply_text_overlay(_base_result, "1:1", _caption)
         log.info("PERF apply_text_overlay: %.0f ms", (time.perf_counter() - _t0) * 1000)
@@ -1783,34 +2148,37 @@ else:
     if _caption.strip():
         _square = _add_description_text(_square, _caption.strip())
 
-    _after = _fit_to_ratio(_square, st.session_state.ratio)
+    _after = _fit_to_ratio(_square, _photo["ratio"])
 
     _t0 = time.perf_counter()
     _png_bytes = _to_png_bytes(_after)
     _after_url = f"data:image/png;base64,{base64.b64encode(_png_bytes).decode()}"
 
-    # before depends only on (original, ratio); cache its data URL per ratio so a
-    # text/description edit doesn't re-crop and re-encode it. Cleared on new upload.
+    # before depends only on (active photo, ratio); cache its data URL per
+    # (index, ratio) so a text/description edit doesn't re-crop and re-encode it.
     _bcache = st.session_state.setdefault("_before_cache", {})
-    _before_url = _bcache.get(st.session_state.ratio)
+    _bkey = (st.session_state.active, _photo["ratio"])
+    _before_url = _bcache.get(_bkey)
     if _before_url is None:
-        _before = _fit_to_ratio(st.session_state.original, st.session_state.ratio)
+        _before = _fit_to_ratio(_photo["original"], _photo["ratio"])
         _before_url = f"data:image/png;base64,{base64.b64encode(_to_png_bytes(_before)).decode()}"
-        _bcache[st.session_state.ratio] = _before_url
+        _bcache[_bkey] = _before_url
     log.info(
         "PERF after png+base64: %.0f ms (after=%.1f MB) | TOTAL rebuild %.0f ms",
         (time.perf_counter() - _t0) * 1000, len(_png_bytes) / 1e6,
         (time.perf_counter() - _t_rebuild) * 1000,
     )
-    _dl_name = f"cj_listing_{st.session_state.ratio.replace(':', 'x')}.png"
+    _dl_name = f"cj_listing_{st.session_state.active + 1}_{_photo['ratio'].replace(':', 'x')}.png"
 
     # Reveal animation plays exactly once, right after processing finishes.
     _animate = bool(st.session_state.pop("animate", False))
 
     # Canvas iframe needs an explicit height; size it to the aspect ratio.
-    _AR = _RATIO_AR.get(st.session_state.ratio, 1.0)            # width / height
-    _canvas_h = max(520, min(820, round(767 / _AR)))
-    st.markdown(f"<style>{_RESULT_CSS}</style>", unsafe_allow_html=True)
+    _AR = _RATIO_AR.get(_photo["ratio"], 1.0)                   # width / height
+    _multi = len(st.session_state.photos) > 1
+    # leave room under the split view for the filmstrip when there's >1 photo
+    _canvas_h = max(520, min(820, round(767 / _AR))) - (120 if _multi else 0)
+    st.markdown(f"<style>{_RESULT_CSS}{_MULTI_CSS}</style>", unsafe_allow_html=True)
     # Image preview on the LEFT, edit panel on the RIGHT.
     _canvas_col, _panel_col = st.columns([13, 7], gap="large")
 
@@ -1897,12 +2265,70 @@ html,body{{height:100%;background:#fff;font-family:'Hanken Grotesk',sans-serif}}
   }}else{{setX(0);}}
 }})();
 </script></body></html>"""
-        components.html(_canvas_doc, height=_canvas_h, scrolling=False)
-        # White wash + frying-pan loader; CSS reveals it while Streamlit reruns.
-        st.markdown(
-            "<div class='cj-loading-overlay'><span class='loader'></span></div>",
-            unsafe_allow_html=True,
-        )
+        with st.container(key="cj_stage"):
+            components.html(_canvas_doc, height=_canvas_h, scrolling=False)
+            # White wash + frying-pan loader; CSS reveals it while Streamlit reruns.
+            st.markdown(
+                "<div class='cj-loading-overlay'><span class='loader'></span></div>",
+                unsafe_allow_html=True,
+            )
+
+        # ── Filmstrip: click a thumbnail to switch the active photo. Each photo
+        #    carries its own edit state, so switching never leaks edits across. ──
+        if _multi:
+            with st.container(key="cj_film"):
+                _thumb_css = []
+                for _i, _p in enumerate(st.session_state.photos):
+                    _turl = _thumb_data_url(_p["result"])
+                    # !important beats the app's global .stButton background shorthand
+                    _thumb_css.append(
+                        f".st-key-cj_thumb_{_i} button{{background-image:url('{_turl}') !important}}"
+                    )
+                    # wrapper anchors the hover ✕ chip to the tile's corner
+                    with st.container(key=f"cj_tw_{_i}"):
+                        st.button(" ", key=f"cj_thumb_{_i}",
+                                  on_click=_activate, args=(_i,))
+                        st.button("✕", key=f"cj_delbtn_{_i}",
+                                  on_click=_ask_delete, args=(_i,))
+                # slot where freshly added photos appear (with spinner) while
+                # they process — instead of loading UI under the + tile
+                _pend_slot = st.empty()
+                # "+ Add Photos" tile — a compact uploader keyed by a nonce so a
+                # completed add doesn't immediately re-fire on the next rerun.
+                _more_key = f"cj_more_{st.session_state.get('more_nonce', 0)}"
+                _more = st.file_uploader(
+                    "Add photos", type=["jpg", "jpeg", "png", "webp"],
+                    accept_multiple_files=True, key=_more_key,
+                    label_visibility="collapsed",
+                )
+                _thumb_css.append(
+                    f".st-key-cj_thumb_{st.session_state.active} button"
+                    "{border:2px solid #1b1b1b !important;filter:none !important;"
+                    "opacity:1 !important}"
+                )
+                st.markdown("<style>" + "".join(_thumb_css) + "</style>",
+                            unsafe_allow_html=True)
+            if _more:
+                # show the new tiles in the strip immediately, then process one
+                # by one — the spinner overlay walks across the pending tiles
+                _urls = []
+                for _f in _more:
+                    try:
+                        _f.seek(0)
+                        _urls.append(_thumb_data_url(
+                            ImageOps.exif_transpose(Image.open(_f))))
+                    except Exception:
+                        _urls.append(None)
+                _warnings = []
+                for _j, _f in enumerate(_more):
+                    _pend_slot.markdown(_pending_tiles_html(_urls, _j),
+                                        unsafe_allow_html=True)
+                    _w = _process_one(_f)
+                    if _w:
+                        _warnings.append(_w)
+                st.session_state.warn = "  ".join(_warnings) if _warnings else None
+                st.session_state.more_nonce = st.session_state.get("more_nonce", 0) + 1
+                st.rerun()
 
     # ── Right edit panel (nesting mirrors Figma: card → header / body / footer;
     #    body → group1 (Output Ratio) + group2 (Text Overlay)) ──────────────────
@@ -1935,9 +2361,11 @@ html,body{{height:100%;background:#fff;font-family:'Hanken Grotesk',sans-serif}}
                 with st.container(key="cj_grp2"):
                     # Real switch — only the switch is clickable (label is inert).
                     # on_change syncs text_mode before the rerun (single recompute).
+                    # value comes from the cj_txt session key (kept in sync with
+                    # the active photo); passing value= too triggers a Streamlit
+                    # "default value but also set via Session State" warning.
                     st.toggle(
                         "Text Overlay",
-                        value=st.session_state.text_mode,
                         key="cj_txt",
                         on_change=_sync_text_mode,
                     )
@@ -1955,11 +2383,114 @@ html,body{{height:100%;background:#fff;font-family:'Hanken Grotesk',sans-serif}}
                         # commits the text as the caption drawn below the image.
                         st.button("Apply", key="cj_apply", on_click=_apply_caption)
 
-            # ── Footer: Export (data-URL download) + Try another (reset) ──
-            st.markdown(
-                "<div class='cj-foot'>"
-                f"<a class='cj-btn-primary' href='{_after_url}' download='{_dl_name}'>Export image</a>"
-                "<a class='cj-btn-outline' href='/' target='_self'>Try another photo</a>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
+            # ── Footer: Export + Try another (reset) ──
+            # One photo → download it directly. Several → open the selection
+            # modal (default: all selected) and export the chosen ones.
+            with st.container(key="cj_foot"):
+                if _multi:
+                    st.button(
+                        f"Export all ({len(st.session_state.photos)})",
+                        key="cj_export_all", type="primary",
+                        on_click=_open_export, use_container_width=True,
+                    )
+                else:
+                    st.download_button(
+                        "Export image", data=_png_bytes, file_name=_dl_name,
+                        mime="image/png", key="cj_export_one",
+                        use_container_width=True,
+                    )
+                st.button(
+                    "Try another photo", key="cj_tryanother",
+                    on_click=_reset_photos, use_container_width=True,
+                )
+
+    # ── Export selection modal (Figma 233:833) ─────────────────────────────────
+    @st.dialog("Export selection", width="large")
+    def _export_dialog():
+        photos = st.session_state.photos
+        sel = st.session_state.export_sel
+        st.markdown(f"<style>{_EXPORT_CSS}</style>", unsafe_allow_html=True)
+        _cols = st.columns(4)
+        for _i, _p in enumerate(photos):
+            with _cols[_i % 4], st.container(key=f"cj_ex_{_i}"):
+                _is_sel = _i in sel
+                # pure-CSS check badge (✓ drawn via ::after) so it never depends
+                # on the Material Symbols icon font loading inside the dialog
+                st.markdown(
+                    f"<div class='cj-ex-tile{' sel' if _is_sel else ''}'>"
+                    f"<img src='{_thumb_data_url(_p['result'])}'/>"
+                    f"<span class='cj-ex-check{' on' if _is_sel else ''}'></span></div>",
+                    unsafe_allow_html=True,
+                )
+                st.button(" ", key=f"cj_exbtn_{_i}", on_click=_toggle_export,
+                          args=(_i,))
+
+        _n = len(sel)
+        if _n == 1:
+            _idx = next(iter(sel))
+            _pp = photos[_idx]
+            _data = _to_png_bytes(_compose_photo(_pp))
+            _fname = f"cj_listing_{_idx + 1}_{_pp['ratio'].replace(':', 'x')}.png"
+            _mime = "image/png"
+        else:
+            _zbuf = io.BytesIO()
+            with zipfile.ZipFile(_zbuf, "w", zipfile.ZIP_DEFLATED) as _z:
+                for _idx in sorted(sel):
+                    _pp = photos[_idx]
+                    _z.writestr(
+                        f"cj_listing_{_idx + 1}_{_pp['ratio'].replace(':', 'x')}.png",
+                        _to_png_bytes(_compose_photo(_pp)),
+                    )
+            _data = _zbuf.getvalue()
+            _fname = "cj_listing_export.zip"
+            _mime = "application/zip"
+
+        with st.container(key="cj_ex_actions"):
+            _a1, _a2 = st.columns(2)
+            with _a1:
+                # A dialog only closes when st.rerun() runs *inside* the dialog
+                # function, so handle the click here rather than via on_click.
+                if st.button("Cancel", key="cj_ex_cancel",
+                             use_container_width=True):
+                    st.session_state.show_export = False
+                    st.rerun()
+            with _a2:
+                # The browser download fires on click; the rerun then closes the
+                # modal. disabled while nothing is selected.
+                if st.download_button(
+                    f"Export selected ({_n})", data=_data, file_name=_fname,
+                    mime=_mime, disabled=(_n == 0),
+                    key="cj_ex_go", type="primary", use_container_width=True,
+                ):
+                    st.session_state.show_export = False
+                    st.rerun()
+
+    if st.session_state.show_export:
+        _export_dialog()
+
+    # ── Delete confirmation (filmstrip ✕) ──────────────────────────────────────
+    @st.dialog("Delete photo")
+    def _delete_dialog():
+        _i = st.session_state.confirm_delete
+        _photos = st.session_state.photos
+        if _i is None or not (0 <= _i < len(_photos)):
+            st.session_state.confirm_delete = None
+            st.rerun()
+        st.markdown(
+            f"Remove **{_photos[_i]['name']}** from this batch? "
+            "Its edits will be lost."
+        )
+        _d1, _d2 = st.columns(2)
+        with _d1:
+            if st.button("Cancel", key="cj_del_cancel", use_container_width=True):
+                st.session_state.confirm_delete = None
+                st.rerun()
+        with _d2:
+            if st.button("Delete", key="cj_del_go", type="primary",
+                         use_container_width=True):
+                _delete_photo(_i)
+                st.session_state.confirm_delete = None
+                st.rerun()
+
+    if st.session_state.confirm_delete is not None:
+        _delete_dialog()
