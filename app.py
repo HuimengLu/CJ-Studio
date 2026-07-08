@@ -1776,7 +1776,7 @@ _MULTI_CSS = """\
   max-width:100% !important;overflow:hidden}
 .st-key-cj_film{border-top:1px solid #cfc4c5;background:#f8f9fa;
   padding:16px 24px !important;display:flex !important;flex-direction:row !important;
-  flex-wrap:nowrap !important;gap:12px !important;align-items:center !important;
+  flex-wrap:nowrap !important;gap:8px !important;align-items:center !important;
   overflow-x:auto !important;height:auto !important;
   width:100% !important;min-width:0 !important;max-width:100% !important}
 .st-key-cj_film::-webkit-scrollbar{height:6px}
@@ -1788,23 +1788,32 @@ _MULTI_CSS = """\
 /* per-photo wrapper: relative anchor for the hover delete button */
 [class*="st-key-cj_tw_"]{position:relative;gap:0 !important;padding:0 !important}
 [class*="st-key-cj_tw_"]>[data-testid="stElementContainer"]{margin:0 !important;width:auto !important}
-/* thumbnails = square buttons painted with the enhanced result; hover matches
-   the Output Ratio cards (border darkens to #7e7576) */
+/* thumbnails = square buttons painted with the enhanced result. The app's
+   global .stButton hover sets a solid grey `background` (shorthand) that would
+   wipe the image to flat grey — re-assert image/size/position under
+   .st-key-cj_film (higher specificity) so the photo survives in every state.
+   The inactive dim is a translucent grayscale filter (image shows through);
+   hover lifts it toward full colour and darkens the border like the ratio cards. */
+.st-key-cj_film [class*="st-key-cj_thumb_"] button,
+.st-key-cj_film [class*="st-key-cj_thumb_"] button:hover{
+  background-color:transparent !important;background-size:cover !important;
+  background-position:center !important;background-repeat:no-repeat !important}
 [class*="st-key-cj_thumb_"] button{width:72px !important;height:72px !important;
-  min-height:72px !important;padding:0 !important;border-radius:2px !important;
-  border:1px solid #cfc4c5 !important;background-size:cover !important;
-  background-position:center !important;background-repeat:no-repeat !important;
-  color:transparent !important;filter:grayscale(1);opacity:.65;
+  min-height:72px !important;padding:0 !important;border-radius:0 !important;
+  border:1px solid #cfc4c5 !important;color:transparent !important;
+  filter:grayscale(1);opacity:.6;
   transition:opacity .15s,filter .15s,border-color .15s}
 [class*="st-key-cj_tw_"]:hover [class*="st-key-cj_thumb_"] button{
-  opacity:1;filter:none;border-color:#7e7576 !important}
+  filter:grayscale(0);opacity:.82;border-color:#7e7576 !important}
 [class*="st-key-cj_thumb_"] button p{display:none}
 /* delete affordance: ✕ chip in the tile's top-right corner, shown on hover;
-   clicking it opens the confirm dialog */
+   clicking it opens the confirm dialog. The show/hide transition lives ONLY on
+   the hover rule — a transition on the base rule would replay 1→0 every rerun
+   (Streamlit re-mounts the button), flashing all ✕ chips on any thumbnail click. */
 [class*="st-key-cj_delbtn_"]{position:absolute !important;top:3px;right:3px;z-index:6;
-  margin:0 !important;width:auto !important;opacity:0;pointer-events:none;
-  transition:opacity .15s}
-[class*="st-key-cj_tw_"]:hover [class*="st-key-cj_delbtn_"]{opacity:1;pointer-events:auto}
+  margin:0 !important;width:auto !important;opacity:0;pointer-events:none}
+[class*="st-key-cj_tw_"]:hover [class*="st-key-cj_delbtn_"]{opacity:1;
+  pointer-events:auto;transition:opacity .15s}
 [class*="st-key-cj_delbtn_"] button{width:20px !important;height:20px !important;
   min-height:20px !important;padding:0 !important;border-radius:50% !important;
   border:1px solid #cfc4c5 !important;background:#fff !important;color:#1b1b1b !important;
@@ -1814,9 +1823,9 @@ _MULTI_CSS = """\
 [class*="st-key-cj_delbtn_"] button p{font-size:11px !important;line-height:1 !important;
   font-weight:600 !important}
 /* pending tiles: freshly added photos processing in place, spinner overlay */
-.cj-pend-row{display:flex;gap:12px}
+.cj-pend-row{display:flex;gap:8px}
 .cj-pend{position:relative;width:72px;height:72px;flex:0 0 auto;
-  border:1px solid #cfc4c5;border-radius:2px;background:#e7e8e9;
+  border:1px solid #cfc4c5;border-radius:0;background:#e7e8e9;
   background-size:cover;background-position:center}
 .cj-pend.dim{opacity:.5}
 .cj-pend.spin::before{content:"";position:absolute;inset:0;background:rgba(255,255,255,.5)}
@@ -1831,7 +1840,7 @@ _MULTI_CSS = """\
 [class*="st-key-cj_more_"] [data-testid="stFileUploader"]>label{display:none}
 [class*="st-key-cj_more_"] section[data-testid="stFileUploaderDropzone"]{
   width:72px;height:72px;min-height:72px;padding:0 !important;border:1.5px dashed #cfc4c5;
-  border-radius:2px;background:#fff;display:flex !important;align-items:center !important;
+  border-radius:0;background:#fff;display:flex !important;align-items:center !important;
   justify-content:center !important;overflow:hidden;transition:border-color .15s}
 [class*="st-key-cj_more_"] section[data-testid="stFileUploaderDropzone"]:hover{border-color:#1b1b1b}
 [class*="st-key-cj_more_"] [data-testid="stFileUploaderDropzoneInstructions"]{margin:0 !important;
@@ -2280,9 +2289,12 @@ html,body{{height:100%;background:#fff;font-family:'Hanken Grotesk',sans-serif}}
                 _thumb_css = []
                 for _i, _p in enumerate(st.session_state.photos):
                     _turl = _thumb_data_url(_p["result"])
-                    # !important beats the app's global .stButton background shorthand
+                    # Scope under .st-key-cj_film so this out-specifies the app's
+                    # global .stButton:hover background shorthand (keeps the image
+                    # on hover instead of flashing to solid grey).
                     _thumb_css.append(
-                        f".st-key-cj_thumb_{_i} button{{background-image:url('{_turl}') !important}}"
+                        f".st-key-cj_film .st-key-cj_thumb_{_i} button"
+                        f"{{background-image:url('{_turl}') !important}}"
                     )
                     # wrapper anchors the hover ✕ chip to the tile's corner
                     with st.container(key=f"cj_tw_{_i}"):
@@ -2301,9 +2313,11 @@ html,body{{height:100%;background:#fff;font-family:'Hanken Grotesk',sans-serif}}
                     accept_multiple_files=True, key=_more_key,
                     label_visibility="collapsed",
                 )
+                # active tile: full colour (no dim), 1px border in the same grey
+                # as the "Try another photo" outline button (#7e7576)
                 _thumb_css.append(
-                    f".st-key-cj_thumb_{st.session_state.active} button"
-                    "{border:2px solid #1b1b1b !important;filter:none !important;"
+                    f".st-key-cj_film .st-key-cj_thumb_{st.session_state.active} button"
+                    "{border:1px solid #7e7576 !important;filter:none !important;"
                     "opacity:1 !important}"
                 )
                 st.markdown("<style>" + "".join(_thumb_css) + "</style>",
@@ -2388,8 +2402,10 @@ html,body{{height:100%;background:#fff;font-family:'Hanken Grotesk',sans-serif}}
             # modal (default: all selected) and export the chosen ones.
             with st.container(key="cj_foot"):
                 if _multi:
+                    # Batch: single "Export" button opens the selection modal;
+                    # no "Try another photo" (the filmstrip manages the batch).
                     st.button(
-                        f"Export all ({len(st.session_state.photos)})",
+                        "Export",
                         key="cj_export_all", type="primary",
                         on_click=_open_export, use_container_width=True,
                     )
@@ -2399,10 +2415,10 @@ html,body{{height:100%;background:#fff;font-family:'Hanken Grotesk',sans-serif}}
                         mime="image/png", key="cj_export_one",
                         use_container_width=True,
                     )
-                st.button(
-                    "Try another photo", key="cj_tryanother",
-                    on_click=_reset_photos, use_container_width=True,
-                )
+                    st.button(
+                        "Try another photo", key="cj_tryanother",
+                        on_click=_reset_photos, use_container_width=True,
+                    )
 
     # ── Export selection modal (Figma 233:833) ─────────────────────────────────
     @st.dialog("Export selection", width="large")
