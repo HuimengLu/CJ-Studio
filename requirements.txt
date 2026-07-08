@@ -1,5 +1,11 @@
-# Core app
-streamlit>=1.32.0
+# API backend (FastAPI; Next.js frontend lives in frontend/)
+fastapi>=0.136
+uvicorn>=0.48
+python-multipart>=0.0.9
+
+# Legacy Streamlit app (app.py) — pinned; kept during the migration.
+# Version-pinned because its CSS targets Streamlit's internal DOM.
+streamlit==1.45.1
 
 # Image I/O and processing
 Pillow>=10.0.0

@@ -1,0 +1,115 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+
+/** Before/after compare slider — port of the Streamlit canvas iframe.
+ *  The after image is in-flow and sizes the card; the before image + divider
+ *  overlay it, clipped to the divider position. Drag anywhere to scrub;
+ *  the corner tags animate fully to either side. */
+export default function CompareSlider({
+  beforeSrc,
+  afterSrc,
+  animate,
+  onAfterLoaded,
+}: {
+  beforeSrc: string;
+  afterSrc: string;
+  animate: boolean;
+  onAfterLoaded?: () => void;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const raf = useRef<number | null>(null);
+  const interacted = useRef(false);
+  const dragging = useRef(false);
+  // capture once: the reveal decision belongs to this mount only, so a parent
+  // re-render flipping the prop mid-sweep can't cancel the animation
+  const reveal = useRef(animate).current;
+  const [x, setX] = useState(reveal ? 100 : 50);
+  const xRef = useRef(x);
+  xRef.current = x;
+
+  const clamp = (v: number) => Math.max(0, Math.min(100, v));
+  const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+  const animateTo = useCallback((target: number) => {
+    interacted.current = true;
+    if (raf.current) cancelAnimationFrame(raf.current);
+    const from = xRef.current;
+    let t0: number | null = null;
+    const dur = 450;
+    const tick = (ts: number) => {
+      if (t0 === null) t0 = ts;
+      const p = Math.min(1, (ts - t0) / dur);
+      setX(clamp(from + (target - from) * ease(p)));
+      if (p < 1) raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+  }, []);
+
+  // initial reveal: sweep 100 → 0 once per mount
+  useEffect(() => {
+    if (!reveal) return;
+    let t0: number | null = null;
+    const dur = 2000;
+    const step = (ts: number) => {
+      if (interacted.current) return;
+      if (t0 === null) t0 = ts;
+      const p = Math.min(1, (ts - t0) / dur);
+      setX(100 * (1 - ease(p)));
+      if (p < 1) raf.current = requestAnimationFrame(step);
+    };
+    raf.current = requestAnimationFrame(step);
+    return () => {
+      if (raf.current) cancelAnimationFrame(raf.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const fromEvent = (clientX: number) => {
+    const r = boxRef.current?.getBoundingClientRect();
+    if (!r) return;
+    setX(clamp(((clientX - r.left) / r.width) * 100));
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest(".cj-tag")) return;
+    dragging.current = true;
+    interacted.current = true;
+    if (raf.current) cancelAnimationFrame(raf.current);
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    fromEvent(e.clientX);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (dragging.current) fromEvent(e.clientX);
+  };
+  const onPointerUp = () => {
+    dragging.current = false;
+  };
+
+  return (
+    <div
+      ref={boxRef}
+      className="cj-split"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img className="cj-after-img" src={afterSrc} alt="Enhanced" onLoad={onAfterLoaded} />
+      <div
+        className="cj-before-wrap"
+        style={{ clipPath: `polygon(0 0, ${x}% 0, ${x}% 100%, 0 100%)` }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={beforeSrc} alt="Original" />
+      </div>
+      <div className="cj-slider" style={{ left: `${x}%` }} />
+      <button className="cj-tag cj-tag-l" onClick={() => animateTo(100)}>
+        Original
+      </button>
+      <button className="cj-tag cj-tag-r" onClick={() => animateTo(0)}>
+        Enhanced
+      </button>
+    </div>
+  );
+}

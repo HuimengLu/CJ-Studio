@@ -2,7 +2,21 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "CJ Listing Formatter",
+      "name": "CJ Studio Web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
+      "port": 3000,
+      "autoPort": false
+    },
+    {
+      "name": "CJ Studio API",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "uvicorn", "backend.main:app", "--port", "8000", "--timeout-keep-alive", "75"],
+      "port": 8000,
+      "autoPort": false
+    },
+    {
+      "name": "CJ Listing Formatter (legacy Streamlit)",
       "runtimeExecutable": "streamlit",
       "runtimeArgs": ["run", "app.py", "--server.port=8501", "--server.headless=true"],
       "port": 8501,
