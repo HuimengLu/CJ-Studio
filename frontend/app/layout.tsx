@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Hanken_Grotesk, Libre_Caslon_Text } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 
@@ -35,6 +37,8 @@ export default function RootLayout({
       <body>
         <Sidebar />
         <main className="cj-main">{children}</main>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
