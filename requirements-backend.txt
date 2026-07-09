@@ -1,0 +1,16 @@
+# FastAPI backend only (no Streamlit) — used by the Docker image that deploys
+# to Hugging Face Spaces / Render / Cloud Run. The full-stack dev deps live in
+# requirements.txt.
+fastapi>=0.136
+uvicorn>=0.48
+python-multipart>=0.0.9
+
+# Image I/O and processing
+Pillow>=10.0.0
+numpy>=1.26.0
+opencv-python-headless>=4.9.0
+
+# Background removal — withoutbg (Depth-Anything V2 + ISNet + matting).
+# Weights download once from Hugging Face; the Dockerfile pre-bakes them.
+withoutbg>=1.0.3
+onnxruntime>=1.16.0

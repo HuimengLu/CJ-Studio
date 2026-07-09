@@ -126,12 +126,41 @@ def _text(canvas, text, x, y, size, lh, S, weight="Bold", fill=(255, 255, 255, 2
 # ── per-template renderers (positions Figma-exact at H=333) ────────────────────
 
 def _r_style1(c, photo, texts, H, S):
-    c.paste(_cover(photo, round(W * S), round(H * S)), (0, 0))
-    _paste_deco(c, "proc_s1_scribble.png", W - 141, -12, 156, S)
-    _v_gradient(c, 0, H - 130, W, 130, GREEN, 0, 255, S)
-    _text(c, texts.get("title", ""), 16, H - 87, 26, 26, S)
-    _text(c, texts.get("subtitle", ""), 16, H - 31, 8, 10, S,
-          weight="Regular", max_w=224)
+    """Style 1 "Spotlight" — Figma 266:547 card layout.
+
+    White card: photo on top (10px margins, rounded 5, soft dark bottom
+    gradient), bold #4c4c4c title (1-2 lines), lime scribble under the last
+    title line, optional small subtitle (omitted entirely when empty).
+    Text anchors from the card's bottom edge — subtitle top H-30, scribble
+    top H-57, last title line H-68 — which reproduces every Figma variant
+    (ratio x line-count); the photo absorbs the remaining height.
+    """
+    draw = ImageDraw.Draw(c)
+    draw.rectangle([0, 0, W * S, H * S], fill=(255, 255, 255, 255))
+
+    title = (texts.get("title") or "").strip() or "Construction Junction"
+    subtitle = (texts.get("subtitle") or "").strip()
+
+    # Measure the title first — the photo grows when the title is one line.
+    font = _font(round(26 * S), "Bold")
+    n_lines = len(_wrap(draw, title, font, 240 * S, 2))
+    last_line_top = H - 68
+    title_top = last_line_top - 26 * (n_lines - 1)
+    photo_h = title_top - 25          # 10 margin + 15 gap above the title
+
+    iw, ih = round(250 * S), round(photo_h * S)
+    img = _cover(photo, iw, ih)
+    c.paste(img, (round(10 * S), round(10 * S)),
+            _rounded_mask(iw, ih, round(5 * S)))
+    _v_gradient(c, 10, 10 + photo_h - 53, 250, 53, (0, 0, 0), 0, 178, S,
+                radius=5)
+
+    _text(c, title, 15, title_top, 26, 26, S,
+          fill=(0x4C, 0x4C, 0x4C, 255), max_w=240)
+    _paste_deco(c, "proc_s2_scribble.png", 7, H - 57, 161.8, S)
+    if subtitle:
+        _text(c, subtitle, 15, H - 30, 8, 10, S, weight="Regular",
+              fill=(0x4C, 0x4C, 0x4C, 255), max_w=240, max_lines=2)
 
 
 def _r_style2(c, photo, texts, H, S):
@@ -208,9 +237,11 @@ def _r_style7(c, photo, texts, H, S):
 
 
 # Text slots are declarative so future templates can add more (or zero) fields.
+# Both are optional: an empty title falls back to the brand placeholder at
+# render time; an empty subtitle simply doesn't appear.
 _SLOTS = [
-    {"key": "title", "label": "Title", "placeholder": "Pittsburgh Penguins"},
-    {"key": "subtitle", "label": "Description", "placeholder": "Hello World!"},
+    {"key": "title", "label": "Title", "placeholder": "Construction Junction"},
+    {"key": "subtitle", "label": "Description (optional)", "placeholder": ""},
 ]
 
 TEMPLATES = [
@@ -244,6 +275,10 @@ def render_template(tpl_id: str, ratio_id: str, img_bytes: bytes,
     tpl = TEMPLATE_BY_ID[tpl_id]
     ratio = RATIO_BY_ID[ratio_id]
     texts = {k: (v or "").strip() for k, v in (texts or {}).items()}
+    # The title is optional in the flow: templates with a title slot fall back
+    # to the brand placeholder. The subtitle stays empty — renderers skip it.
+    if any(s["key"] == "title" for s in tpl["slots"]) and not texts.get("title"):
+        texts["title"] = "Construction Junction"
 
     key = (tpl_id, ratio_id, hashlib.sha1(img_bytes).hexdigest(),
            tuple(sorted(texts.items())), out_w)

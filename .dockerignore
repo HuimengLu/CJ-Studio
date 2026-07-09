@@ -5,4 +5,17 @@ __pycache__
 *.pyc
 *.pyo
 .claude/
-.streamlit/secrets.toml
+.streamlit/
+
+# The backend image doesn't need the frontend (deployed on Vercel) or the
+# legacy Streamlit app + its helpers.
+frontend/
+app.py
+social.py
+scripts/
+
+# Optional Real-ESRGAN weights — the image runs with CJ_UPSCALE=0 (LANCZOS).
+models/
+
+# Docs / scratch
+*.md

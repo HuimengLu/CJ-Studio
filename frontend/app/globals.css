@@ -450,6 +450,37 @@ body {
 .cj-review-col { display: flex; flex-direction: column; align-items: center; padding: 110px 0 130px; }
 .cj-review-cap { font-family: var(--sans); font-size: 16px; color: #9ca3af; margin: 14px 0 0; text-align: left; }
 
+/* ── simplified 3-step flow ── */
+.cj-soc-head.plain { background: none; }
+.cj-soc-head.plain .cj-soc-step { display: none; }
+.cj-soc-center {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  padding: 110px 64px 60px;
+}
+.cj-soc-center .cj-drop { width: 720px; max-width: 100%; }
+.cj-soc-form { max-width: 520px; margin: 0 auto; padding: 150px 24px 0; }
+.cj-form-note { font-size: 13px; color: var(--muted); margin-top: 36px; line-height: 1.5; }
+.cj-soc-stage { padding-top: 96px; }
+.cj-stagecard {
+  background: #fff; border: 1px solid var(--line-soft); border-radius: 2px; padding: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.05);
+}
+.cj-stagecard img {
+  display: block; width: auto; height: auto; max-width: 100%;
+  max-height: calc(100vh - 330px);
+}
+.cj-tpl-thumb {
+  height: 96px; flex: 0 0 auto; padding: 0; background: #fff; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 0; overflow: hidden;
+  opacity: 0.6; filter: grayscale(0.4);
+  transition: opacity 0.15s, filter 0.15s, border-color 0.15s;
+}
+.cj-tpl-thumb:hover { opacity: 0.85; filter: none; border-color: #7e7576; }
+.cj-tpl-thumb.active { opacity: 1; filter: none; border: 1px solid #7e7576; }
+.cj-tpl-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.cj-soc-tplname { font-size: 15px; color: var(--ink); margin: 0; }
+.cj-soc-tplname span { color: var(--muted); }
+
 @media (max-width: 900px) {
   .cj-soc-head, .cj-soc-actions { left: 0; }
   #cj-arc { display: none; }
