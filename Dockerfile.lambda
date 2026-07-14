@@ -1,0 +1,51 @@
+# CJ Studio — FastAPI backend as an AWS Lambda container image.
+# Reuses the Debian base (correct font paths + libGL for opencv) and adds the
+# Lambda Runtime Interface Client + Mangum so backend.main:app runs behind a
+# Lambda Function URL. Build:  docker build -f Dockerfile.lambda -t <img> .
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        libjpeg62-turbo \
+        libpng16-16 \
+        libwebp7 \
+        fonts-dejavu-core \
+        fonts-liberation \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Weights bake into a fixed cache dir readable at runtime (Lambda fs is
+# read-only except /tmp, so the model must already be present in the image).
+ENV HF_HOME=/opt/ml-cache \
+    PYTHONUNBUFFERED=1 \
+    CJ_UPSCALE=0
+
+COPY requirements-backend.txt .
+RUN pip install --no-cache-dir -r requirements-backend.txt awslambdaric mangum
+
+WORKDIR /var/task
+COPY backend/ backend/
+COPY static/social/ static/social/
+COPY fonts/ fonts/
+COPY bg_artwork.png .
+COPY lambda_handler.py .
+
+# Bake the withoutbg weights into the image. opensource() downloads lazily on
+# first use, so pull the whole HF snapshot explicitly (the 4 .onnx files live in
+# repo withoutbg/focus) into HF_HOME, verify they landed (fail the build
+# otherwise), and make the cache world-readable for the Lambda runtime user.
+RUN mkdir -p /opt/ml-cache \
+    && python -c "from huggingface_hub import snapshot_download; snapshot_download('withoutbg/withoutbg-openweights-onnx')" \
+    && python -c "import glob,sys; f=glob.glob('/opt/ml-cache/**/*.onnx',recursive=True); print('baked onnx:',f); sys.exit(0 if f else 1)" \
+    && chmod -R a+rX /opt/ml-cache
+
+# Runtime: Lambda's filesystem is read-only outside /tmp, so tell huggingface_hub
+# to load the baked snapshot straight from cache — no network, no refs/lock writes
+# (those would raise and surface as ModelNotFoundError).
+ENV HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+
+# Lambda Runtime Interface Client → invokes the Mangum handler per request.
+ENTRYPOINT ["python", "-m", "awslambdaric"]
+CMD ["lambda_handler.handler"]

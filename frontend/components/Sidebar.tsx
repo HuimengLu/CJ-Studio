@@ -4,9 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const items = [
-  { href: "/", icon: "upload_file", label: "Upload" },
+  { href: "/", icon: "sell", label: "New Listing" },
   { href: "/social", icon: "grid_view", label: "Social" },
+  { href: "/testing", icon: "science", label: "Testing" },
   { href: "#", icon: "photo_library", label: "Library" },
+  { href: "/testing2", icon: "biotech", label: "Testing 2" },
 ];
 
 export default function Sidebar() {
@@ -22,6 +24,13 @@ export default function Sidebar() {
             key={it.label}
             href={it.href}
             className={`cj-item${pathname === it.href ? " active" : ""}`}
+            // The Listing item returns to its upload screen. When already on "/",
+            // Link can't remount the page, so signal it to reset its own state.
+            onClick={() => {
+              if (it.href === "/") {
+                window.dispatchEvent(new Event("cj:reset-listing"));
+              }
+            }}
           >
             <span className="ms">{it.icon}</span>
             <span>{it.label}</span>

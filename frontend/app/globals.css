@@ -174,16 +174,23 @@ body {
 /* ── Result screen ─────────────────────────────────────────────────────────── */
 .cj-result { display: flex; height: 100vh; overflow: hidden; }
 .cj-canvas-col { flex: 1 1 auto; min-width: 0; background: #fff; display: flex; flex-direction: column; }
-.cj-stage { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 48px; position: relative; }
+.cj-stage { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 48px; position: relative; container-type: size; }
 
-/* compare slider */
+/* compare slider — the box is sized to the output ratio and fitted inside the
+   stage: width = min(stage width, stage height × ratio), height from
+   aspect-ratio. Container-query units (cqi/cqb = stage content box) let this
+   fit both landscape and portrait ratios without the image overflowing and
+   getting clipped by overflow:hidden. --cj-ar is set inline from the ratio. */
 .cj-split {
-  position: relative; max-width: 100%; max-height: 100%; line-height: 0;
+  position: relative; line-height: 0;
+  width: min(100cqi, 100cqb * var(--cj-ar, 1));
+  aspect-ratio: var(--cj-ar, 1);
+  max-width: 100%; max-height: 100%;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), 0 6px 24px rgba(0, 0, 0, 0.06);
   overflow: hidden; background: var(--panel); cursor: ew-resize;
   user-select: none; -webkit-user-select: none;
 }
-.cj-after-img { position: relative; display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; z-index: 1; pointer-events: none; }
+.cj-after-img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; z-index: 1; pointer-events: none; }
 .cj-before-wrap { position: absolute; inset: 0; overflow: hidden; z-index: 2; }
 .cj-before-wrap img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .cj-slider {
@@ -207,6 +214,74 @@ body {
 .cj-tag-r:hover { opacity: 0.9; }
 
 .cj-stage-loading { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.35); }
+
+/* ── dimension annotation overlay ── */
+.cj-dim-layer { position: absolute; inset: 0; z-index: 7; }
+.cj-dim-svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.cj-dim-handle {
+  position: absolute; width: 15px; height: 15px; border-radius: 50%;
+  transform: translate(-50%, -50%); border: 1.5px solid #5d5e66; background: #fff;
+  background-image: radial-gradient(circle at center, #5d5e66 0 2.5px, transparent 3px);
+  z-index: 2; pointer-events: none;   /* interaction handled by .cj-dim-pt */
+}
+.cj-dim-label {
+  position: absolute; transform: translate(-50%, -50%); white-space: nowrap;
+  font-family: var(--sans); font-size: 18px; line-height: 1; color: #5d5e66;
+  cursor: text; z-index: 3; user-select: none;
+}
+.cj-dim-input {
+  position: absolute; transform: translate(-50%, -50%); z-index: 3;
+  width: 184px; padding: 5px 10px; text-align: center;
+  font-family: var(--sans); font-size: 15px; color: #333;
+  background: rgba(255,255,255,0.95); border: 1px solid var(--line); border-radius: 2px;
+  outline: none; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  pointer-events: auto;   /* the layer is pointer-events:none (inherited) */
+}
+.cj-dim-input::placeholder { color: var(--muted); }
+/* Figma 353:113 — Background+Border+Shadow row: text · Revert Selection · X */
+.cj-dim-panel {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 5;
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 24px;
+  background: #fff; border: 1px solid #cfc4c5;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.05);
+}
+.cj-dim-instr {
+  font-family: var(--serif); font-size: 16px; letter-spacing: -0.8px; color: #000;
+  white-space: nowrap;
+}
+.cj-dim-revert {
+  border: 1px solid rgba(126, 117, 118, 0.3); background: none; cursor: pointer;
+  padding: 5px 9px; font-family: var(--sans); font-weight: 600; font-size: 14px;
+  line-height: 20px; color: rgba(126, 117, 118, 0.6); white-space: nowrap;
+}
+.cj-dim-x {
+  border: none; background: none; cursor: pointer; color: #000;
+  display: flex; padding: 0; line-height: 0;
+}
+.cj-dim-x .ms { font-size: 20px; }
+.cj-dimadd {
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  border: none; background: none; cursor: pointer; color: var(--ink); padding: 0;
+}
+.cj-dimadd .ms { font-size: 22px; }
+.cj-dimrow { cursor: pointer; }
+.cj-dimrow:hover .cj-sec, .cj-dimrow:hover .cj-dimadd { color: var(--ink-soft); }
+.cj-dim-pt {
+  position: absolute; width: 28px; height: 28px; border-radius: 50%;
+  transform: translate(-50%, -50%); cursor: grab; touch-action: none; z-index: 3;
+  pointer-events: auto;   /* the layer is pointer-events:none (inherited) */
+}
+.cj-dim-pt:active { cursor: grabbing; }
+.cj-dim-trash {
+  position: absolute; transform: translate(-50%, -50%); width: 28px; height: 28px;
+  border-radius: 50%; background: #fff; border: 1.5px solid #d64545; color: #d64545;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+  cursor: pointer; z-index: 4; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  pointer-events: auto;
+}
+.cj-dim-trash .ms { font-size: 16px; }
+.cj-dim-trash:hover { background: #d64545; color: #fff; }
 .cj-spin {
   width: 26px; height: 26px; border: 2px solid var(--line); border-top-color: var(--ink);
   border-radius: 50%; animation: cjspin 0.8s linear infinite;
@@ -266,6 +341,29 @@ body {
   flex: 0 0 384px; width: 384px; background: #fff; border-left: 1px solid var(--line);
   display: flex; flex-direction: column; overflow: hidden;
 }
+.cj-panel.left { border-left: none; border-right: 1px solid var(--line); }
+.cj-color-row { display: flex; gap: 8px; }
+.cj-color-card {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 18px 1px; cursor: pointer;
+  background: var(--bg); color: var(--ink-soft); border: 1px solid var(--line);
+}
+.cj-color-card small {
+  font-family: var(--sans); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.cj-color-card:hover { border-color: #7e7576; }
+.cj-color-card.active { border: 1px solid #191c1d; color: var(--ink); }
+.cj-color-dot {
+  width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line);
+  display: block;
+}
+.cj-apply-wide {
+  align-self: stretch; padding: 14px; background: #191c1d; border: none; border-radius: 0;
+  font-family: var(--sans); font-size: 13px; font-weight: 600; letter-spacing: 1px;
+  text-transform: uppercase; color: #fff; cursor: pointer;
+}
+.cj-apply-wide:hover { background: #000; }
 .cj-panel-head { padding: 48px; border-bottom: 1px solid var(--line); }
 .cj-panel-head h3 { font-family: var(--serif); font-size: 48px; line-height: 56px; letter-spacing: -0.96px; font-weight: 400; color: #000; margin: 0; }
 .cj-panel-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 48px; display: flex; flex-direction: column; gap: 48px; }
@@ -450,14 +548,21 @@ body {
 .cj-review-col { display: flex; flex-direction: column; align-items: center; padding: 110px 0 130px; }
 .cj-review-cap { font-family: var(--sans); font-size: 16px; color: #9ca3af; margin: 14px 0 0; text-align: left; }
 
-/* ── simplified 3-step flow ── */
+/* ── simplified 2-step flow ── */
 .cj-soc-head.plain { background: none; }
 .cj-soc-head.plain .cj-soc-step { display: none; }
 .cj-soc-center {
-  min-height: 100vh; display: flex; align-items: center; justify-content: center;
-  padding: 110px 64px 60px;
+  min-height: 100vh; display: flex; align-items: flex-start; justify-content: center;
+  padding: 48px 64px;
 }
 .cj-soc-center .cj-drop { width: 720px; max-width: 100%; }
+.cj-soc-setup { width: 720px; max-width: 100%; display: flex; flex-direction: column; gap: 36px; }
+.cj-soc-setup .cj-drop { width: 100%; min-height: 320px; }
+.cj-drop-preview {
+  position: relative; max-width: calc(100% - 48px); max-height: 240px;
+  object-fit: contain; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+.cj-drop-preview + .cj-drop-hint { position: relative; }
 .cj-soc-form { max-width: 520px; margin: 0 auto; padding: 150px 24px 0; }
 .cj-form-note { font-size: 13px; color: var(--muted); margin-top: 36px; line-height: 1.5; }
 .cj-soc-stage { padding-top: 96px; }
@@ -478,8 +583,19 @@ body {
 .cj-tpl-thumb:hover { opacity: 0.85; filter: none; border-color: #7e7576; }
 .cj-tpl-thumb.active { opacity: 1; filter: none; border: 1px solid #7e7576; }
 .cj-tpl-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.cj-soc-tplname { font-size: 15px; color: var(--ink); margin: 0; }
+.cj-soc-tplname { font-size: 15px; color: var(--ink); margin: 0; text-transform: capitalize; }
 .cj-soc-tplname span { color: var(--muted); }
+.cj-reroll {
+  background: none; border: none; padding: 0; cursor: pointer; font-family: var(--sans);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.cj-reroll:hover { color: var(--ink); }
+.cj-reroll:disabled { color: var(--line); cursor: default; }
+.cj-soc-empty {
+  font-family: var(--sans); font-size: 15px; line-height: 1.6; color: var(--ink-soft);
+  text-align: center;
+}
 
 @media (max-width: 900px) {
   .cj-soc-head, .cj-soc-actions { left: 0; }
@@ -487,4 +603,13 @@ body {
   .cj-panel { flex-basis: 100%; width: 100%; }
   .cj-result { flex-direction: column; height: auto; }
   .cj-edit-row { flex-direction: column; padding: 110px 24px 40px; }
+  /* Stacked layout gives the stage auto height, so container-type:size would
+     collapse it — fall back to letting the image size the box (no clipping
+     risk here since nothing constrains its height). */
+  .cj-stage { container-type: normal; }
+  .cj-split { width: auto; aspect-ratio: auto; }
+  .cj-after-img {
+    position: relative; inset: auto; width: auto; height: auto;
+    max-width: 100%; max-height: 100%; object-fit: fill;
+  }
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CompareSlider from "@/components/CompareSlider";
+import DimensionOverlay, { type Dimension } from "@/components/DimensionOverlay";
 
 type Ratio = "1:1" | "4:3" | "4:5";
 const RATIOS: { id: Ratio; label: string }[] = [
@@ -9,6 +10,8 @@ const RATIOS: { id: Ratio; label: string }[] = [
   { id: "4:3", label: "WEBSITE" },
   { id: "4:5", label: "INSTAGRAM" },
 ];
+/** Numeric width/height per ratio — drives the preview box's aspect-ratio. */
+const RATIO_AR: Record<Ratio, number> = { "1:1": 1, "4:3": 4 / 3, "4:5": 4 / 5 };
 
 /** One processed photo; edit state is per-photo so edits never leak across. */
 type Photo = {
@@ -16,8 +19,10 @@ type Photo = {
   name: string;
   ratio: Ratio;
   textMode: boolean;
+  origBg: boolean;        // 25% original photo between backdrop and subject
   caption: string;        // input draft
   applied: string;        // caption actually rendered (committed via Apply)
+  dimensions: Dimension[];       // measurement annotations (normalized coords)
 };
 
 type ProcRow = {
@@ -30,6 +35,7 @@ type ProcRow = {
 const imgUrl = (p: Photo, kind: "after" | "before", w?: number) =>
   `/api/photos/${p.id}/image?kind=${kind}&ratio=${encodeURIComponent(p.ratio)}` +
   `&text=${p.textMode ? 1 : 0}&caption=${encodeURIComponent(p.textMode ? p.applied : "")}` +
+  `&origbg=${p.origBg ? 1 : 0}` +
   (w ? `&w=${w}` : "");
 
 async function processFile(f: File): Promise<{ id?: string; warn?: string }> {
@@ -91,6 +97,8 @@ export default function ListingPage() {
   const [exportSel, setExportSel] = useState<Set<number>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [dragover, setDragover] = useState(false);
+  const [dimMode, setDimMode] = useState(false);
+  const sliderCtl = useRef<{ toLeft: () => void } | null>(null);
   const cancelled = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const moreRef = useRef<HTMLInputElement>(null);
@@ -101,6 +109,27 @@ export default function ListingPage() {
     setImgLoading(true);
     setPhotos((ps) => ps.map((p, i) => (i === active ? { ...p, ...patch } : p)));
   }, [active]);
+
+  /* Return to the empty upload screen. Fired by the sidebar's Listing item —
+     clicking it while already on "/" can't remount this page, so it dispatches
+     a "cj:reset-listing" event that we handle here. */
+  const resetToHome = useCallback(() => {
+    cancelled.current = true;
+    setPhase("home");
+    setRows([]);
+    setPhotos([]);
+    setPending([]);
+    setActive(0);
+    setWarn(null);
+    setDimMode(false);
+    setExportOpen(false);
+    setConfirmDelete(null);
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("cj:reset-listing", resetToHome);
+    return () => window.removeEventListener("cj:reset-listing", resetToHome);
+  }, [resetToHome]);
 
   /* ── initial batch: one row per file, processed sequentially ── */
   const startBatch = useCallback(async (files: File[]) => {
@@ -118,7 +147,7 @@ export default function ListingPage() {
       const out = await processFile(files[i]);
       if (cancelled.current) return;
       if (out.id) {
-        got.push({ id: out.id, name: files[i].name, ratio: "1:1", textMode: false, caption: "", applied: "" });
+        got.push({ id: out.id, name: files[i].name, ratio: "1:1", textMode: false, origBg: false, caption: "", applied: "", dimensions: [] });
         setRows((r) => r.map((row, j) => (j === i ? { ...row, state: "done" } : row)));
       } else {
         warns.push(out.warn ?? files[i].name);
@@ -148,7 +177,7 @@ export default function ListingPage() {
       const out = await processFile(files[i]);
       if (out.id) {
         setPhotos((ps) => [...ps, {
-          id: out.id!, name: files[i].name, ratio: "1:1", textMode: false, caption: "", applied: "",
+          id: out.id!, name: files[i].name, ratio: "1:1", textMode: false, origBg: false, caption: "", applied: "", dimensions: [],
         }]);
       } else {
         warns.push(out.warn ?? files[i].name);
@@ -176,7 +205,7 @@ export default function ListingPage() {
   const exportSelected = useCallback(async () => {
     const items = photos
       .filter((_, i) => exportSel.has(i))
-      .map((p) => ({ id: p.id, ratio: p.ratio, text_mode: p.textMode, caption: p.textMode ? p.applied : "" }));
+      .map((p) => ({ id: p.id, ratio: p.ratio, text_mode: p.textMode, caption: p.textMode ? p.applied : "", orig_bg: p.origBg }));
     if (!items.length) return;
     setExporting(true);
     try {
@@ -190,7 +219,7 @@ export default function ListingPage() {
   const exportSingle = useCallback(() => {
     if (!photo) return;
     void downloadExport(
-      [{ id: photo.id, ratio: photo.ratio, text_mode: photo.textMode, caption: photo.textMode ? photo.applied : "" }],
+      [{ id: photo.id, ratio: photo.ratio, text_mode: photo.textMode, caption: photo.textMode ? photo.applied : "", orig_bg: photo.origBg }],
       `cj_listing_${photo.ratio.replace(":", "x")}.png`,
     );
   }, [photo]);
@@ -289,8 +318,22 @@ export default function ListingPage() {
             key={photo.id}
             beforeSrc={imgUrl(photo, "before", 1400)}
             afterSrc={imgUrl(photo, "after", 1400)}
+            aspectRatio={RATIO_AR[photo.ratio]}
             animate={animate}
             onAfterLoaded={() => { setAnimate(false); setImgLoading(false); }}
+            controlRef={sliderCtl}
+            overlay={
+              (dimMode || photo.dimensions.length > 0) && (
+                <DimensionOverlay
+                  key={photo.id}
+                  adding={dimMode}
+                  dimensions={photo.dimensions}
+                  onChange={(ds) => setPhotos((ps) => ps.map((p, i) => (i === active ? { ...p, dimensions: ds } : p)))}
+                  onExitAdding={() => setDimMode(false)}
+                  onInteract={() => sliderCtl.current?.toLeft()}
+                />
+              )
+            }
           />
           {imgLoading && <div className="cj-stage-loading"><div className="cj-spin" /></div>}
         </div>
@@ -302,7 +345,7 @@ export default function ListingPage() {
                 <button
                   className={`cj-thumb${i === active ? " active" : ""}`}
                   style={{ backgroundImage: `url(/api/photos/${p.id}/thumb)` }}
-                  onClick={() => { if (i !== active) { setActive(i); setImgLoading(true); } }}
+                  onClick={() => { if (i !== active) { setActive(i); setImgLoading(true); setDimMode(false); } }}
                   aria-label={p.name}
                 />
                 <button className="cj-delbtn" onClick={() => setConfirmDelete(i)} aria-label={`Delete ${p.name}`}>
@@ -331,7 +374,6 @@ export default function ListingPage() {
 
       {/* ── right edit panel (Figma 182:544 / 182:605) ── */}
       <aside className="cj-panel">
-        <div className="cj-panel-head"><h3>Adjust</h3></div>
         <div className="cj-panel-body">
           <div className="cj-grp">
             <p className="cj-sec">Output Ratio</p>
@@ -374,6 +416,16 @@ export default function ListingPage() {
               )}
             </div>
           </div>
+          <div className="cj-grp">
+            <div className="cj-toggle-row">
+              <p className="cj-sec">Original Background</p>
+              <button
+                className={`cj-switch${photo.origBg ? " on" : ""}`}
+                onClick={() => mutatePhoto({ origBg: !photo.origBg })}
+                aria-label="Toggle original background"
+              />
+            </div>
+          </div>
           {warn && <div className="cj-warn">&#9888; {warn}</div>}
         </div>
         <div className="cj-foot">
@@ -385,16 +437,14 @@ export default function ListingPage() {
               Export
             </button>
           ) : (
-            <>
-              <button className="cj-btn-primary" onClick={exportSingle}>Export image</button>
-              <button
-                className="cj-btn-outline"
-                onClick={() => { setPhotos([]); setPhase("home"); setWarn(null); }}
-              >
-                Try another photo
-              </button>
-            </>
+            <button className="cj-btn-primary" onClick={exportSingle}>Export image</button>
           )}
+          <button
+            className="cj-btn-outline"
+            onClick={() => { setDimMode(true); sliderCtl.current?.toLeft(); }}
+          >
+            Add Dimensions
+          </button>
         </div>
       </aside>
 

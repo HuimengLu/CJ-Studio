@@ -9,13 +9,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export default function CompareSlider({
   beforeSrc,
   afterSrc,
+  aspectRatio,
   animate,
   onAfterLoaded,
+  overlay,
+  controlRef,
 }: {
   beforeSrc: string;
   afterSrc: string;
+  /** Numeric width/height of the output ratio (1, 4/3, 4/5). Drives the box's
+   *  aspect-ratio so the preview fits the stage without clipping (see .cj-split
+   *  container-query sizing in globals.css). */
+  aspectRatio: number;
   animate: boolean;
   onAfterLoaded?: () => void;
+  overlay?: React.ReactNode;
+  /** Imperative handle: lets the parent glide the divider (e.g. fully left
+   *  while dimension annotations are being added/edited). */
+  controlRef?: React.MutableRefObject<{ toLeft: () => void } | null>;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const raf = useRef<number | null>(null);
@@ -45,6 +56,13 @@ export default function CompareSlider({
     };
     raf.current = requestAnimationFrame(tick);
   }, []);
+
+  // parent control: glide the divider fully left (eased, no jump)
+  useEffect(() => {
+    if (!controlRef) return;
+    controlRef.current = { toLeft: () => animateTo(0) };
+    return () => { controlRef.current = null; };
+  }, [controlRef, animateTo]);
 
   // initial reveal: sweep 100 → 0 once per mount
   useEffect(() => {
@@ -90,6 +108,7 @@ export default function CompareSlider({
     <div
       ref={boxRef}
       className="cj-split"
+      style={{ "--cj-ar": aspectRatio } as React.CSSProperties}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -110,6 +129,7 @@ export default function CompareSlider({
       <button className="cj-tag cj-tag-r" onClick={() => animateTo(0)}>
         Enhanced
       </button>
+      {overlay}
     </div>
   );
 }
