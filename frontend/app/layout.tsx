@@ -1,9 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Hanken_Grotesk, Libre_Caslon_Text } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
+import PageTitleBar from "@/components/PageTitleBar";
 
 const caslon = Libre_Caslon_Text({
   weight: ["400", "700"],
@@ -22,21 +23,25 @@ export const metadata: Metadata = {
   description: "Construction Junction internal tools",
 };
 
+/* viewport-fit=cover lets the mobile top bar / pinned Download extend into
+   the notch and home-indicator areas via env(safe-area-inset-*). */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${caslon.variable} ${hanken.variable}`}>
-      <head>
-        {/* Material Symbols for sidebar / UI icons */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0..1,0&display=block"
-          rel="stylesheet"
-        />
-      </head>
       <body>
         <Sidebar />
-        <main className="cj-main">{children}</main>
+        <main className="cj-main">
+          <PageTitleBar />
+          {children}
+        </main>
         <Analytics />
         <SpeedInsights />
       </body>

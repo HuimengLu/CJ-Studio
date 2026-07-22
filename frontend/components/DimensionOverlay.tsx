@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { TrashIcon, XIcon } from "@/components/icons";
 
 /* Product dimension annotations (Figma 324:674) — multiple per image.
    Coordinates are normalized (0-1) relative to the displayed image, so the
@@ -359,7 +360,7 @@ export default function DimensionOverlay({
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); removeDim(i); }}
           >
-            <span className="ms">delete</span>
+            <TrashIcon size={16} />
           </button>
         );
       })}
@@ -380,7 +381,7 @@ export default function DimensionOverlay({
             </button>
           )}
           <button className="cj-dim-x" onClick={onExitAdding} aria-label="Exit dimension mode">
-            <span className="ms">close</span>
+            <XIcon size={16} />
           </button>
         </div>
       )}

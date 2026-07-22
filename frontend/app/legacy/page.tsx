@@ -1,20 +1,10 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CompareSlider from "@/components/CompareSlider";
 import DimensionOverlay, { type Dimension } from "@/components/DimensionOverlay";
 import { ArrowClockwiseIcon, CameraPlusIcon, CheckCircleIcon, CircleIcon } from "@/components/icons";
 import OptionCard from "@/components/OptionCard";
-
-/* New Listing — the primary photo-processing pipeline: gpt-image-2 redraws the
-   product on a white background with a studio shadow, multiply-blended onto the
-   CJ backdrop. (The pre-AI local pipeline lives on at /legacy.) The backend
-   routes keep their historical /api/testing2 prefix.
-
-   Cover mode: Generate Cover classifies the product (gpt-4.1-mini) and
-   composes it into that category's scene (gpt-image-2 + static/cover bg). The
-   scene lands as an EXTRA filmstrip entry (variant "cover") sharing the same
-   backend id as the white-plate entry; its "before" is the original photo. */
 
 type Ratio = "1:1" | "4:3" | "4:5";
 const RATIOS: { id: Ratio; label: string }[] = [
@@ -22,19 +12,21 @@ const RATIOS: { id: Ratio; label: string }[] = [
   { id: "4:3", label: "WEBSITE" },
   { id: "4:5", label: "INSTAGRAM" },
 ];
+/** Numeric width/height per ratio — drives the preview box's aspect-ratio. */
 const RATIO_AR: Record<Ratio, number> = { "1:1": 1, "4:3": 4 / 3, "4:5": 4 / 5 };
 
+/** One processed photo; edit state is per-photo so edits never leak across. */
 type Photo = {
   id: string;
   name: string;
   ratio: Ratio;
-  dimensions: Dimension[];
-  variant?: "cover";           // undefined = white-plate entry
+  origBg: boolean;        // 25% original photo between backdrop and subject
+  dimensions: Dimension[];       // measurement annotations (normalized coords)
 };
 
 type ProcRow = {
   name: string;
-  thumb: string | null;
+  thumb: string | null;   // object URL
   state: "waiting" | "active" | "done" | "error";
   warn?: string;
 };
@@ -49,45 +41,19 @@ type FailedRow = {
   busy?: boolean;
 };
 
-/** Stable per-entry key — cover entries share the backend id with their
- *  white-plate sibling, so the id alone would collide. */
-const entryKey = (p: Photo) => `${p.id}:${p.variant ?? "after"}`;
-
-const imgUrl = (p: Photo, slot: "after" | "before", w?: number) => {
-  const kind = slot === "after" && p.variant === "cover" ? "cover" : slot;
-  return `/api/testing2/${p.id}/image?kind=${kind}&ratio=${encodeURIComponent(p.ratio)}` +
-    (w ? `&w=${w}` : "");
-};
-
-const thumbUrl = (p: Photo, s?: number) =>
-  `/api/testing2/${p.id}/thumb?kind=${p.variant === "cover" ? "cover" : "after"}` +
-  (s ? `&s=${s}` : "");
-
-/* Batch uploads run through gpt-image-2 (~15-50s each), so process several in
-   parallel. 3 workers balances total wall time against OpenAI's per-minute
-   rate limits (the backend retries 429s with backoff as a safety net). */
-const CONCURRENCY = 3;
-
-async function runPool<T>(jobs: (() => Promise<T>)[], limit: number): Promise<T[]> {
-  const results = new Array<T>(jobs.length);
-  let next = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(limit, jobs.length) }, async () => {
-      while (next < jobs.length) {
-        const i = next++;
-        results[i] = await jobs[i]();
-      }
-    }),
-  );
-  return results;
-}
+const imgUrl = (p: Photo, kind: "after" | "before", w?: number) =>
+  `/api/photos/${p.id}/image?kind=${kind}&ratio=${encodeURIComponent(p.ratio)}` +
+  `&origbg=${p.origBg ? 1 : 0}` +
+  (w ? `&w=${w}` : "");
 
 async function processFile(f: File): Promise<{ id?: string; warn?: string }> {
+  // one retry: the dev proxy occasionally reuses a keep-alive connection the
+  // backend already closed (ECONNRESET) — a fresh attempt gets a new socket
   for (let attempt = 0; attempt < 2; attempt++) {
     const fd = new FormData();
     fd.append("file", f);
     try {
-      const res = await fetch("/api/testing2", { method: "POST", body: fd });
+      const res = await fetch("/api/photos", { method: "POST", body: fd });
       const j = await res.json();
       if (!res.ok || !j.id) return { warn: j.warn ?? `${f.name}: processing failed` };
       return { id: j.id };
@@ -98,18 +64,12 @@ async function processFile(f: File): Promise<{ id?: string; warn?: string }> {
   return { warn: `${f.name}: network error` };
 }
 
-/* Shown whenever a photo's server-side record is gone (the in-memory backend
-   was restarted) — the only fix is re-uploading. */
-const SESSION_EXPIRED =
-  "Session expired — the server restarted and these photos are gone. Please re-upload.";
-
 async function downloadExport(items: object[], fallback: string) {
-  const res = await fetch("/api/testing2/export", {
+  const res = await fetch("/api/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ items }),
   });
-  if (!res.ok) throw new Error(res.status === 404 ? SESSION_EXPIRED : `Export failed (${res.status}) — please retry.`);
   const blob = await res.blob();
   const m = (res.headers.get("Content-Disposition") ?? "").match(/filename="([^"]+)"/);
   const a = document.createElement("a");
@@ -119,24 +79,19 @@ async function downloadExport(items: object[], fallback: string) {
   URL.revokeObjectURL(a.href);
 }
 
-function StepsStrip({ current = 0 }: { current?: number }) {
-  const steps = ["Upload", "Optimize", "Export"];
+function StepsStrip() {
   return (
     <div className="cj-strip">
-      {steps.map((label, i) => (
-        <span key={label} style={{ display: "contents" }}>
-          {i > 0 && <span className="cj-dash">—</span>}
-          <div className={`cj-step${current === i + 1 ? " active" : ""}`}>
-            <span className="cj-num">{i + 1}</span>
-            <span className="cj-steplbl">{label}</span>
-          </div>
-        </span>
-      ))}
+      <div className="cj-step"><span className="cj-num">1</span><span className="cj-steplbl">Upload</span></div>
+      <span className="cj-dash">—</span>
+      <div className="cj-step"><span className="cj-num">2</span><span className="cj-steplbl">Algorithm Optimize</span></div>
+      <span className="cj-dash">—</span>
+      <div className="cj-step"><span className="cj-num">3</span><span className="cj-steplbl">Export</span></div>
     </div>
   );
 }
 
-export default function ListingPage() {
+export default function LegacyListingPage() {
   const [phase, setPhase] = useState<"home" | "processing" | "result">("home");
   const [rows, setRows] = useState<ProcRow[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -150,26 +105,8 @@ export default function ListingPage() {
   const [exportSel, setExportSel] = useState<Set<number>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [dragover, setDragover] = useState(false);
-  const [dropHover, setDropHover] = useState(false);
   const [dimMode, setDimMode] = useState(false);
-  const [coverBusy, setCoverBusy] = useState<Set<string>>(new Set());
-  const [pendingSelect, setPendingSelect] = useState<string | null>(null);
   const [failed, setFailed] = useState<FailedRow[]>([]);
-  const [savedNote, setSavedNote] = useState(false);
-  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Covers that finished while the user was on another photo — badge, don't yank.
-  const [newCovers, setNewCovers] = useState<Set<string>>(new Set());
-  // Soft delete: the removed entry is held here for 5s before the backend
-  // delete really happens, so a slip of the mouse can't destroy paid work.
-  const [undoDelete, setUndoDelete] = useState<{ entry: Photo; index: number } | null>(null);
-  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  /* Transient "Saved to Library" confirmation after a successful export. */
-  const flashSaved = useCallback(() => {
-    setSavedNote(true);
-    if (savedTimer.current) clearTimeout(savedTimer.current);
-    savedTimer.current = setTimeout(() => setSavedNote(false), 2500);
-  }, []);
   const sliderCtl = useRef<{ toLeft: () => void } | null>(null);
   const cancelled = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -177,24 +114,14 @@ export default function ListingPage() {
 
   const photo = photos[active];
 
-  // Live mirrors for async callbacks (cover completion, delayed deletes).
-  const activePhotoIdRef = useRef<string | null>(null);
-  const photosRef = useRef(photos);
-  useEffect(() => {
-    activePhotoIdRef.current = photo?.id ?? null;
-    photosRef.current = photos;
-  });
+  const mutatePhoto = useCallback((patch: Partial<Photo>) => {
+    setImgLoading(true);
+    setPhotos((ps) => ps.map((p, i) => (i === active ? { ...p, ...patch } : p)));
+  }, [active]);
 
-  // A fresh cover was selected — its "new" badge has served its purpose.
-  useEffect(() => {
-    if (photo?.variant === "cover" && newCovers.has(photo.id)) {
-      setNewCovers((s) => { const n = new Set(s); n.delete(photo.id); return n; });
-    }
-  }, [photo, newCovers]);
-
-  /* Return to the empty upload screen. Fired by the sidebar's New Listing item —
-     clicking it while already on "/" can't remount this page, so it dispatches
-     a "cj:reset-listing" event that we handle here. */
+  /* Return to the empty upload screen. Fired by the sidebar's Legacy Listing
+     item — clicking it while already on /legacy can't remount this page, so it
+     dispatches a "cj:reset-legacy" event that we handle here. */
   const resetToHome = useCallback(() => {
     cancelled.current = true;
     setPhase("home");
@@ -206,13 +133,13 @@ export default function ListingPage() {
     setDimMode(false);
     setExportOpen(false);
     setConfirmDelete(null);
-    setCoverBusy(new Set());
-    setPendingSelect(null);
     setFailed([]);
-    setNewCovers(new Set());
-    if (undoTimer.current) clearTimeout(undoTimer.current);
-    setUndoDelete(null);
   }, []);
+
+  useEffect(() => {
+    window.addEventListener("cj:reset-legacy", resetToHome);
+    return () => window.removeEventListener("cj:reset-legacy", resetToHome);
+  }, [resetToHome]);
 
   // Esc leaves dimension-placing mode (matches the Library's Esc habit).
   useEffect(() => {
@@ -222,29 +149,7 @@ export default function ListingPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [dimMode]);
 
-  useEffect(() => {
-    window.addEventListener("cj:reset-listing", resetToHome);
-    return () => window.removeEventListener("cj:reset-listing", resetToHome);
-  }, [resetToHome]);
-
-  // Select a freshly inserted entry (e.g. a new cover) once it exists.
-  useEffect(() => {
-    if (!pendingSelect) return;
-    const idx = photos.findIndex((p) => entryKey(p) === pendingSelect);
-    if (idx >= 0) {
-      setActive(idx);
-      setImgLoading(true);
-      setDimMode(false);
-      setAnimate(true);          // sweep reveal on the fresh cover, like any switch
-    }
-    setPendingSelect(null);
-  }, [pendingSelect, photos]);
-
-  const mutatePhoto = useCallback((patch: Partial<Photo>) => {
-    setImgLoading(true);
-    setPhotos((ps) => ps.map((p, i) => (i === active ? { ...p, ...patch } : p)));
-  }, [active]);
-
+  /* ── initial batch: one row per file, processed sequentially ── */
   const startBatch = useCallback(async (files: File[]) => {
     files = files.filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
@@ -252,30 +157,23 @@ export default function ListingPage() {
     setRows(files.map((f) => ({ name: f.name, thumb: URL.createObjectURL(f), state: "waiting" })));
     setPhase("processing");
 
-    const results = await runPool(
-      files.map((f, i) => async () => {
-        if (cancelled.current) return null;
-        setRows((r) => r.map((row, j) => (j === i ? { ...row, state: "active" } : row)));
-        const out = await processFile(f);
-        setRows((r) => r.map((row, j) =>
-          (j === i ? { ...row, state: out.id ? "done" : "error", warn: out.warn } : row)));
-        return out;
-      }),
-      CONCURRENCY,
-    );
-    if (cancelled.current) return;
-
     const got: Photo[] = [];
     const fails: FailedRow[] = [];
     const warns: string[] = [];
-    results.forEach((out, i) => {
-      if (out?.id) {
-        got.push({ id: out.id, name: files[i].name, ratio: "1:1", dimensions: [] });
-      } else if (out) {
+    for (let i = 0; i < files.length; i++) {
+      if (cancelled.current) return;
+      setRows((r) => r.map((row, j) => (j === i ? { ...row, state: "active" } : row)));
+      const out = await processFile(files[i]);
+      if (cancelled.current) return;
+      if (out.id) {
+        got.push({ id: out.id, name: files[i].name, ratio: "1:1", origBg: false, dimensions: [] });
+        setRows((r) => r.map((row, j) => (j === i ? { ...row, state: "done" } : row)));
+      } else {
         fails.push({ name: files[i].name, thumb: URL.createObjectURL(files[i]), file: files[i], warn: out.warn });
         warns.push(`${files[i].name}: ${out.warn ?? "failed"}`);
+        setRows((r) => r.map((row, j) => (j === i ? { ...row, state: "error", warn: out.warn } : row)));
       }
-    });
+    }
     setFailed(fails);
     setWarn(warns.length ? warns.join("  ") : null);
     if (got.length) {
@@ -289,30 +187,27 @@ export default function ListingPage() {
     }
   }, []);
 
+  /* ── add more from the filmstrip: spinner tiles walk across in place ── */
   const addMore = useCallback(async (files: File[]) => {
     files = files.filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
     setPending(files.map((f) => ({ name: f.name, thumb: URL.createObjectURL(f), state: "waiting" })));
-    const results = await runPool(
-      files.map((f, i) => async () => {
-        setPending((t) => t.map((x, j) => (j === i ? { ...x, state: "active" } : x)));
-        const out = await processFile(f);
-        setPending((t) => t.map((x, j) => (j === i ? { ...x, state: "done" } : x)));
-        return out;
-      }),
-      CONCURRENCY,
-    );
     const warns: string[] = [];
-    results.forEach((out, i) => {
+    for (let i = 0; i < files.length; i++) {
+      setPending((t) => t.map((x, j) => (j === i ? { ...x, state: "active" } : x)));
+      const out = await processFile(files[i]);
       if (out.id) {
-        setPhotos((ps) => [...ps, { id: out.id!, name: files[i].name, ratio: "1:1", dimensions: [] }]);
+        setPhotos((ps) => [...ps, {
+          id: out.id!, name: files[i].name, ratio: "1:1", origBg: false, dimensions: [],
+        }]);
       } else {
         setFailed((fs) => [...fs, {
           name: files[i].name, thumb: URL.createObjectURL(files[i]), file: files[i], warn: out.warn,
         }]);
         warns.push(`${files[i].name}: ${out.warn ?? "failed"}`);
       }
-    });
+      setPending((t) => t.map((x, j) => (j === i ? { ...x, state: "done" } : x)));
+    }
     setPending([]);
     setWarn(warns.length ? warns.join("  ") : null);
   }, []);
@@ -325,7 +220,7 @@ export default function ListingPage() {
     setFailed((fs) => fs.map((f, j) => (j === idx ? { ...f, busy: true } : f)));
     const out = await processFile(row.file);
     if (out.id) {
-      setPhotos((ps) => [...ps, { id: out.id!, name: row.name, ratio: "1:1", dimensions: [] }]);
+      setPhotos((ps) => [...ps, { id: out.id!, name: row.name, ratio: "1:1", origBg: false, dimensions: [] }]);
       setFailed((fs) => fs.filter((f) => f.file !== row.file));
       setWarn(null);
     } else {
@@ -334,131 +229,43 @@ export default function ListingPage() {
     }
   }, [failed]);
 
-  /* Cover on/off for the active photo's backend id. On: one-time generation
-     (classify + scene, cached server-side) then a new filmstrip entry; off:
-     remove the entry (cache stays, re-enabling is free). */
-  const toggleCover = useCallback(async () => {
-    if (!photo) return;
-    const id = photo.id;
-    const existing = photos.findIndex((p) => p.id === id && p.variant === "cover");
-    if (existing >= 0) {
-      setPhotos((ps) => ps.filter((_, j) => j !== existing));
-      setActive((a) => {
-        const base = photos.findIndex((p) => p.id === id && !p.variant);
-        return a === existing ? Math.max(0, base) : a > existing ? a - 1 : a;
-      });
-      return;
-    }
-    if (coverBusy.has(id)) return;
-    setCoverBusy((s) => new Set(s).add(id));
-    try {
-      const res = await fetch(`/api/testing2/${id}/cover`, { method: "POST" });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j.ok) {
-        setWarn(res.status === 404 ? SESSION_EXPIRED : (j.warn ?? "Cover generation failed — please retry."));
-        return;
-      }
-      setPhotos((ps) => {
-        const base = ps.findIndex((p) => p.id === id && !p.variant);
-        if (base < 0 || ps.some((p) => p.id === id && p.variant === "cover")) return ps;
-        const entry: Photo = {
-          id, name: `${ps[base].name} · cover`, ratio: ps[base].ratio,
-          dimensions: [], variant: "cover",
-        };
-        return [...ps.slice(0, base + 1), entry, ...ps.slice(base + 1)];
-      });
-      // Only jump to the new cover if the user is still on this photo —
-      // otherwise badge it in the filmstrip instead of yanking their focus.
-      if (activePhotoIdRef.current === id) {
-        setPendingSelect(`${id}:cover`);
-      } else {
-        setNewCovers((s) => new Set(s).add(id));
-      }
-    } catch {
-      setWarn("Cover generation failed: network error");
-    } finally {
-      setCoverBusy((s) => { const n = new Set(s); n.delete(id); return n; });
-    }
-  }, [photo, photos, coverBusy]);
-
-  /* Backend delete only when no remaining filmstrip entry shares the record
-     (cover + white-plate entries share one id). Checked against live state so
-     an undo that restored the entry cancels the wipe. */
-  const finalizeDelete = useCallback((entry: Photo) => {
-    if (!photosRef.current.some((p) => p.id === entry.id)) {
-      fetch(`/api/testing2/${entry.id}`, { method: "DELETE" }).catch(() => {});
-    }
-  }, []);
-
   const deletePhoto = useCallback((i: number) => {
     const target = photos[i];
-    if (!target) return;
+    if (target) fetch(`/api/photos/${target.id}`, { method: "DELETE" }).catch(() => {});
     const next = photos.filter((_, j) => j !== i);
-    // A new delete finalizes any previous pending one.
-    if (undoTimer.current) { clearTimeout(undoTimer.current); undoTimer.current = null; }
-    if (undoDelete) finalizeDelete(undoDelete.entry);
     setPhotos(next);
-    setConfirmDelete(null);
     if (!next.length) {
-      // Removing the last photo leaves the page — no toast to host an undo,
-      // so this one deletes immediately (the confirm dialog still gates it).
-      setUndoDelete(null);
-      fetch(`/api/testing2/${target.id}`, { method: "DELETE" }).catch(() => {});
       setPhase("home");
       setActive(0);
-      return;
+    } else {
+      setActive((a) => Math.max(0, Math.min(i < a ? a - 1 : a, next.length - 1)));
     }
-    setActive((a) => Math.max(0, Math.min(i < a ? a - 1 : a, next.length - 1)));
-    setUndoDelete({ entry: target, index: i });
-    undoTimer.current = setTimeout(() => {
-      finalizeDelete(target);
-      setUndoDelete(null);
-      undoTimer.current = null;
-    }, 5000);
-  }, [photos, undoDelete, finalizeDelete]);
-
-  const undoRemove = useCallback(() => {
-    if (undoTimer.current) { clearTimeout(undoTimer.current); undoTimer.current = null; }
-    setUndoDelete((pending) => {
-      if (pending) {
-        setPhotos((ps) => {
-          const idx = Math.min(pending.index, ps.length);
-          return [...ps.slice(0, idx), pending.entry, ...ps.slice(idx)];
-        });
-      }
-      return null;
-    });
-  }, []);
+    setConfirmDelete(null);
+  }, [photos]);
 
   const exportSelected = useCallback(async () => {
     const items = photos
       .filter((_, i) => exportSel.has(i))
-      .map((p) => ({ id: p.id, ratio: p.ratio, kind: p.variant === "cover" ? "cover" : "after", dimensions: p.dimensions }));
+      .map((p) => ({ id: p.id, ratio: p.ratio, orig_bg: p.origBg, dimensions: p.dimensions }));
     if (!items.length) return;
     setExporting(true);
     try {
       await downloadExport(items, items.length > 1 ? "cj_photos.zip" : "cj_photo.png");
       setExportOpen(false);
-      flashSaved();
-    } catch (e) {
-      setWarn(e instanceof Error ? e.message : "Export failed — please retry.");
     } finally {
       setExporting(false);
     }
-  }, [photos, exportSel, flashSaved]);
+  }, [photos, exportSel]);
 
   const exportSingle = useCallback(() => {
     if (!photo) return;
-    downloadExport(
-      [{ id: photo.id, ratio: photo.ratio, kind: photo.variant === "cover" ? "cover" : "after", dimensions: photo.dimensions }],
+    void downloadExport(
+      [{ id: photo.id, ratio: photo.ratio, orig_bg: photo.origBg, dimensions: photo.dimensions }],
       `cj_listing_${photo.ratio.replace(":", "x")}.png`,
-    ).then(flashSaved)
-      .catch((e) => setWarn(e instanceof Error ? e.message : "Export failed — please retry."));
-  }, [photo, flashSaved]);
+    );
+  }, [photo]);
 
   const multi = photos.length > 1;
-  const coverOn = !!photo && photos.some((p) => p.id === photo.id && p.variant === "cover");
-  const busy = !!photo && coverBusy.has(photo.id);
   const donePct = useMemo(() => {
     const done = rows.filter((r) => r.state === "done" || r.state === "error").length;
     return rows.length ? Math.round((done / rows.length) * 100) : 0;
@@ -476,8 +283,6 @@ export default function ListingPage() {
           onDragOver={(e) => { e.preventDefault(); setDragover(true); }}
           onDragLeave={() => setDragover(false)}
           onDrop={(e) => { e.preventDefault(); setDragover(false); startBatch(Array.from(e.dataTransfer.files)); }}
-          onMouseEnter={() => setDropHover(true)}
-          onMouseLeave={() => setDropHover(false)}
         >
           <div className="cj-drop-icon"><CameraPlusIcon size={40} /></div>
           <div className="cj-drop-title">Click or drop files</div>
@@ -488,8 +293,7 @@ export default function ListingPage() {
             onChange={(e) => { startBatch(Array.from(e.target.files ?? [])); e.target.value = ""; }}
           />
         </div>
-        <div className="cj-drop-note">Got multiple photos? Upload them all. We&apos;ll process 3 at a time.</div>
-        <StepsStrip current={dragover || dropHover ? 1 : 0} />
+        <StepsStrip />
       </div>
     );
   }
@@ -522,7 +326,7 @@ export default function ListingPage() {
                   <div className="cj-proc-top">
                     <span className="cj-proc-name">{r.name}</span>
                     <span className="cj-proc-status">
-                      {{ waiting: "Waiting…", active: "Optimizing… usually 20–40s", done: "Done", error: "Failed" }[r.state]}
+                      {{ waiting: "Waiting…", active: "Optimizing…", done: "Done", error: "Failed" }[r.state]}
                     </span>
                   </div>
                   <div className="cj-proc-track"><div className="cj-proc-fill" /></div>
@@ -534,7 +338,7 @@ export default function ListingPage() {
             Cancel
           </button>
         </div>
-        <StepsStrip current={2} />
+        <StepsStrip />
       </div>
     );
   }
@@ -546,31 +350,24 @@ export default function ListingPage() {
     <div className="cj-result">
       {/* Global notices float over the stage — panel-buried warnings get missed. */}
       {warn && <div className="cj-warn cj-warn-float">&#9888; {warn}</div>}
-      {undoDelete && (
-        <div className="cj-undo">
-          <span>Photo removed</span>
-          <button onClick={undoRemove}>Undo</button>
-        </div>
-      )}
       <div className="cj-canvas-col">
         <div className="cj-stage">
+          {/* key on photo.id only: switching photos remounts (fresh slider +
+              reveal), but editing the same photo — ratio / text / caption —
+              keeps the component so the divider stays where the user left it;
+              only the image srcs update. */}
           <CompareSlider
-            key={entryKey(photo)}
+            key={photo.id}
             beforeSrc={imgUrl(photo, "before", 1400)}
             afterSrc={imgUrl(photo, "after", 1400)}
             aspectRatio={RATIO_AR[photo.ratio]}
             animate={animate}
-            restX={0}
             onAfterLoaded={() => { setAnimate(false); setImgLoading(false); }}
-            onAfterError={() => {
-              setImgLoading(false);
-              setWarn(SESSION_EXPIRED);
-            }}
             controlRef={sliderCtl}
             overlay={
               (dimMode || photo.dimensions.length > 0) && (
                 <DimensionOverlay
-                  key={entryKey(photo)}
+                  key={photo.id}
                   adding={dimMode}
                   dimensions={photo.dimensions}
                   onChange={(ds) => setPhotos((ps) => ps.map((p, i) => (i === active ? { ...p, dimensions: ds } : p)))}
@@ -587,35 +384,17 @@ export default function ListingPage() {
         {(
           <div className="cj-film">
             {photos.map((p, i) => (
-              <Fragment key={entryKey(p)}>
-                <div className="cj-tw">
-                  <button
-                    className={`cj-thumb${i === active ? " active" : ""}`}
-                    style={{ backgroundImage: `url(${thumbUrl(p)})` }}
-                    onClick={() => { if (i !== active) { setActive(i); setImgLoading(true); setDimMode(false); setAnimate(true); } }}
-                    aria-label={p.name}
-                  />
-                  <button className="cj-delbtn" onClick={() => setConfirmDelete(i)} aria-label={`Delete ${p.name}`}>
-                    ✕
-                  </button>
-                  {p.variant === "cover" && newCovers.has(p.id) && (
-                    <span className="cj-newdot" title="New cover — click to view" />
-                  )}
-                </div>
-                {/* A cover being generated shows up immediately as a loading
-                    tile where the finished cover will land (right after its
-                    base photo), styled like an uploading photo. The tile's
-                    image is the cover's "before" (the original upload). */}
-                {!p.variant && coverBusy.has(p.id) &&
-                  !photos.some((q) => q.id === p.id && q.variant === "cover") && (
-                    <div
-                      className="cj-pend spin"
-                      style={{ backgroundImage: `url(/api/testing2/${p.id}/image?kind=before&ratio=1:1&w=160)` }}
-                      title="Generating cover…"
-                      aria-label="Generating cover"
-                    />
-                  )}
-              </Fragment>
+              <div key={p.id} className="cj-tw">
+                <button
+                  className={`cj-thumb${i === active ? " active" : ""}`}
+                  style={{ backgroundImage: `url(/api/photos/${p.id}/thumb)` }}
+                  onClick={() => { if (i !== active) { setActive(i); setImgLoading(true); setDimMode(false); } }}
+                  aria-label={p.name}
+                />
+                <button className="cj-delbtn" onClick={() => setConfirmDelete(i)} aria-label={`Delete ${p.name}`}>
+                  ✕
+                </button>
+              </div>
             ))}
             {pending.map((t, i) => (
               <div
@@ -647,6 +426,7 @@ export default function ListingPage() {
         />
       </div>
 
+      {/* ── right edit panel (Figma 182:544 / 182:605) ── */}
       <aside className="cj-panel">
         <div className="cj-panel-body">
           <div className="cj-grp">
@@ -664,6 +444,17 @@ export default function ListingPage() {
                 ))}
               </div>
             </div>
+            <div className="cj-field">
+              <div className="cj-toggle-row">
+                <span className="cj-label">Original Background</span>
+                <button
+                  className={`cj-switch${photo.origBg ? " on" : ""}`}
+                  onClick={() => mutatePhoto({ origBg: !photo.origBg })}
+                  aria-label="Toggle original background"
+                />
+              </div>
+              <p className="cj-hint">Blends the original photo into the backdrop at 25% opacity</p>
+            </div>
           </div>
           <div className="cj-grp cj-actions">
             <button
@@ -675,21 +466,6 @@ export default function ListingPage() {
             >
               {dimMode ? "Placing points — Esc to exit" : "Add Dimensions"}
             </button>
-            <div className="cj-field">
-              <button
-                className="cj-btn-outline"
-                disabled={busy}
-                onClick={toggleCover}
-                aria-busy={busy}
-              >
-                {busy ? "Generating Cover…" : coverOn ? "Remove Cover" : "Generate Cover"}
-              </button>
-              <p className="cj-hint" role="status">
-                {busy
-                  ? "Hang tight! Your cover will appear below in about 20–40 seconds."
-                  : "Adding a cover usually takes 20–40 seconds."}
-              </p>
-            </div>
           </div>
         </div>
         <div className="cj-foot">
@@ -703,10 +479,10 @@ export default function ListingPage() {
           ) : (
             <button className="cj-btn-primary" onClick={exportSingle}>Export image</button>
           )}
-          {savedNote && <p className="cj-saved">✓ Saved to Library</p>}
         </div>
       </aside>
 
+      {/* ── export selection modal (all selected by default) ── */}
       {exportOpen && (
         <div className="cj-modal-scrim" onClick={() => setExportOpen(false)}>
           <div className="cj-modal" onClick={(e) => e.stopPropagation()}>
@@ -717,7 +493,7 @@ export default function ListingPage() {
               <div className="cj-modal-grid">
                 {photos.map((p, i) => (
                   <button
-                    key={entryKey(p)}
+                    key={p.id}
                     className={`cj-ex-item${exportSel.has(i) ? " sel" : ""}`}
                     onClick={() =>
                       setExportSel((s) => {
@@ -728,19 +504,17 @@ export default function ListingPage() {
                     }
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={thumbUrl(p, 320)} alt={p.name} />
+                    <img src={`/api/photos/${p.id}/thumb?s=320`} alt={p.name} />
                     <span className="cj-ex-badge">
                       {exportSel.has(i) ? <CheckCircleIcon size={15} /> : <CircleIcon size={15} />}
                     </span>
-                    {/* what this tile actually contains — batch exports pick the right version */}
-                    <span className="cj-ex-flags">
-                      {p.variant === "cover" && <span className="cj-ex-flag">Cover</span>}
-                      {p.dimensions.length > 0 && (
+                    {p.dimensions.length > 0 && (
+                      <span className="cj-ex-flags">
                         <span className="cj-ex-flag">
                           {p.dimensions.length} dim{p.dimensions.length > 1 ? "s" : ""}
                         </span>
-                      )}
-                    </span>
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -755,6 +529,7 @@ export default function ListingPage() {
         </div>
       )}
 
+      {/* ── delete confirm ── */}
       {confirmDelete !== null && photos[confirmDelete] && (
         <div className="cj-modal-scrim" onClick={() => setConfirmDelete(null)}>
           <div className="cj-modal small" onClick={(e) => e.stopPropagation()}>

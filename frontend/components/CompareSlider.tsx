@@ -12,8 +12,10 @@ export default function CompareSlider({
   aspectRatio,
   animate,
   onAfterLoaded,
+  onAfterError,
   overlay,
   controlRef,
+  restX = 50,
 }: {
   beforeSrc: string;
   afterSrc: string;
@@ -23,10 +25,16 @@ export default function CompareSlider({
   aspectRatio: number;
   animate: boolean;
   onAfterLoaded?: () => void;
+  /** Fired when the after image fails to load — e.g. the in-memory backend
+   *  restarted and this photo's record is gone. */
+  onAfterError?: () => void;
   overlay?: React.ReactNode;
   /** Imperative handle: lets the parent glide the divider (e.g. fully left
    *  while dimension annotations are being added/edited). */
   controlRef?: React.MutableRefObject<{ toLeft: () => void } | null>;
+  /** Divider start position (%) when NOT running the reveal animation — e.g. 0
+   *  to mount already showing the "after" image. Defaults to 50 (half/half). */
+  restX?: number;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const raf = useRef<number | null>(null);
@@ -35,7 +43,7 @@ export default function CompareSlider({
   // capture once: the reveal decision belongs to this mount only, so a parent
   // re-render flipping the prop mid-sweep can't cancel the animation
   const reveal = useRef(animate).current;
-  const [x, setX] = useState(reveal ? 100 : 50);
+  const [x, setX] = useState(reveal ? 100 : restX);
   const xRef = useRef(x);
   xRef.current = x;
 
@@ -114,7 +122,7 @@ export default function CompareSlider({
       onPointerUp={onPointerUp}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img className="cj-after-img" src={afterSrc} alt="Enhanced" onLoad={onAfterLoaded} />
+      <img className="cj-after-img" src={afterSrc} alt="Enhanced" onLoad={onAfterLoaded} onError={onAfterError} />
       <div
         className="cj-before-wrap"
         style={{ clipPath: `polygon(0 0, ${x}% 0, ${x}% 100%, 0 100%)` }}
@@ -129,7 +137,15 @@ export default function CompareSlider({
       <button className="cj-tag cj-tag-r" onClick={() => animateTo(0)}>
         Enhanced
       </button>
-      {overlay}
+      {/* Overlays (dimension annotations) belong to the AFTER image only, so
+          they are clipped to the divider's right side — the before layer must
+          never show them. Clipping also removes pointer hits on the hidden
+          part, which is correct: you can't edit what you can't see. */}
+      {overlay && (
+        <div className="cj-overlay-clip" style={{ clipPath: `inset(0 0 0 ${x}%)` }}>
+          {overlay}
+        </div>
+      )}
     </div>
   );
 }

@@ -15,11 +15,9 @@ formatter) and a social-media graphic generator.
   - `/` — Listing workflow: multi-photo upload → batch processing →
     before/after compare, per-photo ratio/text-overlay edits, filmstrip,
     export selection (PNG/ZIP)
-  - `/social` — Social Media Generator: ratio+upload → template gallery →
-    live text editing → download
-- **`app.py`** — legacy Streamlit app (same features, pre-migration). Kept
-  temporarily; will be removed once the new stack is fully adopted.
-
+  - `/social` — Social Media Generator: upload + title/subtitle → categorized
+    template filmstrip (Cover / Text / Secondary / Image; templates the current
+    content can't use dim in place) → live preview → download
 ## Run (development)
 
 ```bash
@@ -46,7 +44,11 @@ The two halves deploy independently:
 
 ## Assets
 
-- `static/social/` — decoration assets exported from the Figma file
-  (regenerate alphas with `python3 scripts/prep_social_assets.py`)
-- `fonts/Gabarito.ttf` — brand font used by the social templates
+- `static/social2/` — decoration assets for the social template set
+  (white+alpha masks keyed from 4x Figma exports; see
+  `scripts/prep_social2_assets.py`)
+- `static/social/placeholder_icon.png` — glyph for the neutral preview base
+- `fonts/IBMPlexSerif-*.ttf`, `fonts/IBMPlexSans-Medium.ttf` — template
+  typography (Plex Sans stands in for Helvetica Neue in the Secondary-1
+  byline)
 - `bg_artwork.png` — text-overlay background artwork

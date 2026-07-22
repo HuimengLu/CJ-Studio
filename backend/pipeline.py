@@ -1,4 +1,4 @@
-"""CJ Studio listing pipeline — extracted from app.py, framework-free.
+"""CJ Studio listing pipeline — framework-free.
 
 Every function that used to read/write st.session_state now takes and returns
 explicit values, so the same code runs under FastAPI (or any host):
@@ -399,14 +399,11 @@ def generate_product_shadow(r_mask, bx_s, by_s, bw_s, bh_s, ox, oy, target_cx, C
     return shadow, empty
 
 
-def _place_subject(rgb: np.ndarray, alpha: np.ndarray, shadow_fn=None):
+def _place_subject(rgb: np.ndarray, alpha: np.ndarray):
     """Crop to the subject, colour-grade it, and fit onto the 1600² backdrop.
 
-    Shared by make_listing and the Testing-2 variant comparison so every result
-    runs the identical crop / grade / shadow / composite path. `shadow_fn`
-    (same signature as generate_product_shadow, the default) lets Testing-2
-    swap in alternative shadow renderers. Returns (out_pil, full_mask,
-    full_rgba, full_orig), or None when no usable subject remains.
+    Returns (out_pil, full_mask, full_rgba, full_orig), or None when no
+    usable subject remains.
     """
     h, w = rgb.shape[:2]
     total = h * w
@@ -466,7 +463,7 @@ def _place_subject(rgb: np.ndarray, alpha: np.ndarray, shadow_fn=None):
     bw_s = int(bw * scale)
     bh_s = int(bh * scale)
 
-    cast_shadow, contact_shadow = (shadow_fn or generate_product_shadow)(
+    cast_shadow, contact_shadow = generate_product_shadow(
         r_mask, bx_s, by_s, bw_s, bh_s, ox, oy, target_cx, CS,
     )
 
@@ -548,221 +545,6 @@ def make_listing(pil_img: Image.Image):
         time.perf_counter() - t_total, out.width, out.height,
     )
     return out, None, full_mask, full_rgba, full_orig
-
-
-def _blank_canvas() -> Image.Image:
-    """Backdrop-only 1600² frame — shown when a variant carves the subject away."""
-    CS = 1600
-    bg = load_product_bg()
-    if bg is not None:
-        canvas = np.array(ImageOps.fit(bg, (CS, CS), Image.LANCZOS))
-    else:
-        canvas = np.full((CS, CS, 3), [253, 253, 242], dtype=np.uint8)
-    return Image.fromarray(canvas)
-
-
-# ── Testing-2: five shadow-rendering strategies for the grounded product look ────
-#
-# Same cut-out, five ways to draw the shadow that anchors it to the backdrop.
-# Every renderer shares generate_product_shadow's signature — the mask is the
-# resized crop, (bx_s..bh_s) its bbox within the crop, (ox, oy) the crop's
-# offset on the canvas — so _place_subject can swap them in directly.
-
-def _canvas_dims(CS):
-    return (CS, CS) if isinstance(CS, int) else CS
-
-
-def _shadow_silhouette(r_mask, ox, oy, CH, CW) -> np.ndarray:
-    """Full-canvas 0..1 silhouette of the subject at its composited position."""
-    sil = np.zeros((CH, CW), dtype=np.float32)
-    H, W = r_mask.shape[:2]
-    cy0, cy1 = max(0, oy), min(CH, oy + H)
-    cx0, cx1 = max(0, ox), min(CW, ox + W)
-    if cy1 > cy0 and cx1 > cx0:
-        sil[cy0:cy1, cx0:cx1] = (
-            r_mask[cy0 - oy:cy1 - oy, cx0 - ox:cx1 - ox].astype(np.float32) / 255.0
-        )
-    return sil
-
-
-def _shadow_degenerate(r_mask, bw_s, bh_s) -> bool:
-    return int(np.count_nonzero(r_mask > 128)) < 100 or bw_s < 4 or bh_s < 4
-
-
-def _shadow_contact_ellipse(r_mask, bx_s, by_s, bw_s, bh_s, ox, oy, target_cx, CS):
-    """S2 — soft elliptical pool centred under the item, blurred heavily.
-
-    Ignores the silhouette shape entirely: cheap, never leaks artefacts, but
-    reads generic on items with separated feet (chairs, tripods)."""
-    CH, CW = _canvas_dims(CS)
-    empty = np.zeros((CH, CW), dtype=np.float32)
-    if _shadow_degenerate(r_mask, bw_s, bh_s):
-        return empty, empty
-
-    base_y = min(CH - 1, oy + by_s + bh_s)
-    cx = ox + bx_s + bw_s // 2
-    ell = empty.copy()
-    cv2.ellipse(ell, (cx, base_y), (max(4, int(bw_s * 0.46)), max(3, int(bw_s * 0.06))),
-                0, 0, 360, 1.0, -1)
-    ell = cv2.GaussianBlur(ell, (0, 0), max(8.0, bw_s * 0.055))
-    return np.clip(ell * 0.34, 0.0, 1.0), empty
-
-
-def _shadow_perspective_cast(r_mask, bx_s, by_s, bw_s, bh_s, ox, oy, target_cx, CS):
-    """S3 — silhouette flipped onto the floor, squashed and sheared like a low
-    sun behind-left, fading and softening with distance from the base."""
-    CH, CW = _canvas_dims(CS)
-    empty = np.zeros((CH, CW), dtype=np.float32)
-    if _shadow_degenerate(r_mask, bw_s, bh_s):
-        return empty, empty
-
-    sub = r_mask[by_s:by_s + bh_s, bx_s:bx_s + bw_s].astype(np.float32) / 255.0
-    cast_h = max(4, int(bh_s * 0.30))
-    squashed = cv2.resize(sub, (bw_s, cast_h), interpolation=cv2.INTER_AREA)
-    squashed = squashed[::-1]  # mirror across the base line: feet stay put
-
-    # Shear right so higher parts of the object land further right on the floor.
-    shear = 0.55
-    pad = int(cast_h * shear) + 2
-    M = np.float32([[1, shear, 0], [0, 1, 0]])
-    sheared = cv2.warpAffine(squashed, M, (bw_s + pad, cast_h))
-
-    base_y = oy + by_s + bh_s
-    cast = empty.copy()
-    cy0, cy1 = max(0, base_y), min(CH, base_y + cast_h)
-    cx0, cx1 = max(0, ox + bx_s), min(CW, ox + bx_s + bw_s + pad)
-    if cy1 > cy0 and cx1 > cx0:
-        cast[cy0:cy1, cx0:cx1] = sheared[cy0 - base_y:cy1 - base_y,
-                                         cx0 - (ox + bx_s):cx1 - (ox + bx_s)]
-
-    near = cv2.GaussianBlur(cast, (0, 0), max(3.0, bw_s * 0.012))
-    far = cv2.GaussianBlur(cast, (0, 0), max(10.0, bw_s * 0.05))
-    fade = np.clip((np.arange(CH, dtype=np.float32) - base_y) / max(1, cast_h), 0, 1)
-    mix = fade[:, None]
-    cast = near * (1 - mix) * 0.30 + far * mix * 0.14
-    return np.clip(cast, 0.0, 1.0), empty
-
-
-def _shadow_grounded(r_mask, bx_s, by_s, bw_s, bh_s, ox, oy, target_cx, CS):
-    """S4 — shadow only where the item nears the floor: each silhouette pixel is
-    weighted by its height above the base, so legs and contact points pool dark
-    while the body casts nothing. Closest to a studio product shot."""
-    CH, CW = _canvas_dims(CS)
-    empty = np.zeros((CH, CW), dtype=np.float32)
-    if _shadow_degenerate(r_mask, bw_s, bh_s):
-        return empty, empty
-
-    sil = _shadow_silhouette(r_mask, ox, oy, CH, CW)
-    base_y = min(CH - 2, oy + by_s + bh_s)
-    height = np.maximum(0.0, base_y - np.arange(CH, dtype=np.float32))
-    falloff = np.exp(-height / max(12.0, bh_s * 0.12))
-    seed = sil * falloff[:, None]
-
-    # Mirror the near-ground wedge below the contact line: the seed overlaps
-    # the subject (which is composited on top and would hide it), so reflect
-    # its energy onto the visible floor instead.
-    span = min(CH - base_y, base_y)
-    floor = np.zeros_like(seed)
-    if span > 2:
-        floor[base_y:base_y + span] = seed[base_y - span:base_y][::-1]
-
-    tight = cv2.GaussianBlur(floor, (0, 0), max(5.0, bw_s * 0.02))
-    wide = cv2.GaussianBlur(floor, (0, 0), max(16.0, bw_s * 0.09))
-    return np.clip(tight * 0.45 + wide * 0.30, 0.0, 1.0), empty
-
-
-def _shadow_layered(r_mask, bx_s, by_s, bw_s, bh_s, ox, oy, target_cx, CS):
-    """S5 — two-layer studio look: a wide faint ambient halo from the whole
-    silhouette plus a tight dark band under the columns that actually touch
-    the ground (per-column footprint)."""
-    CH, CW = _canvas_dims(CS)
-    empty = np.zeros((CH, CW), dtype=np.float32)
-    if _shadow_degenerate(r_mask, bw_s, bh_s):
-        return empty, empty
-
-    sil = _shadow_silhouette(r_mask, ox, oy, CH, CW)
-    ambient = cv2.GaussianBlur(sil, (0, 0), max(20.0, bw_s * 0.12)) * 0.15
-
-    # Footprint: columns where the silhouette reaches the bottom 12% of the bbox.
-    sub = r_mask[by_s:by_s + bh_s, bx_s:bx_s + bw_s]
-    strip = sub[int(bh_s * 0.88):, :]
-    footprint = (strip > 128).any(axis=0).astype(np.float32)
-
-    base_y = min(CH - 2, oy + by_s + bh_s)
-    band_h = max(4, int(bh_s * 0.05))
-    band = empty.copy()
-    cy0, cy1 = max(0, base_y - band_h // 3), min(CH, base_y + band_h)
-    cx0, cx1 = max(0, ox + bx_s), min(CW, ox + bx_s + bw_s)
-    if cy1 > cy0 and cx1 > cx0:
-        band[cy0:cy1, cx0:cx1] = footprint[None, cx0 - (ox + bx_s):cx1 - (ox + bx_s)]
-    band = cv2.GaussianBlur(band, (0, 0), max(6.0, bw_s * 0.03)) * 0.55
-
-    return np.clip(ambient + band, 0.0, 1.0), empty
-
-
-# (key, label, desc, renderer) — S1 is the production shadow as the baseline.
-_SHADOW_VARIANTS = [
-    ("S1", "Soft drop (production)",
-     "Current pipeline shadow: the whole silhouette blurred and nudged "
-     "down-left at low opacity. Uniform and safe, but floaty — nothing "
-     "anchors the feet to the floor.",
-     generate_product_shadow),
-    ("S2", "Contact ellipse",
-     "A blurred elliptical pool centred under the item. Shape-agnostic so it "
-     "never leaks artefacts, but generic under items with separated legs.",
-     _shadow_contact_ellipse),
-    ("S3", "Perspective cast",
-     "Silhouette mirrored onto the floor, squashed and sheared as if lit by a "
-     "low light behind-left; softer and fainter with distance. Most dramatic, "
-     "depends on the silhouette reading well upside-down.",
-     _shadow_perspective_cast),
-    ("S4", "Grounded contact",
-     "Each silhouette pixel casts in proportion to how close it is to the "
-     "floor: legs pool dark, the body casts nothing. Closest to a natural "
-     "studio shot (the reference look).",
-     _shadow_grounded),
-    ("S5", "Ambient + footprint",
-     "Two layers: a wide faint halo from the whole silhouette plus a tight "
-     "dark band only under the columns that actually touch the ground.",
-     _shadow_layered),
-]
-
-
-def make_listing_variants(pil_img: Image.Image):
-    """Matte once (production hole handling), composite the five shadow
-    strategies (S1–S5).
-
-    Returns (panels, warn) where panels is a list of (key, label, desc, image);
-    on failure panels is None and warn holds the message.
-    """
-    log.info("make_listing_variants: start input=%dx%d", pil_img.width, pil_img.height)
-    t_total = time.perf_counter()
-
-    up_img = pil_img
-    if max(pil_img.width, pil_img.height) < _UPSCALE_BELOW:
-        up_rgb, up = _esrgan_upscale(np.array(pil_img.convert("RGB")))
-        if up > 1:
-            up_img = Image.fromarray(up_rgb)
-
-    try:
-        rgb, alpha = _extract_subject(up_img)
-    except RuntimeError as exc:
-        log.warning("make_listing_variants: subject extraction failed - %s", exc)
-        return None, str(exc)
-
-    # Identical matte for every panel — the production clean-up from
-    # make_listing — so the only thing that differs is the shadow.
-    alpha = _tighten_alpha_small_holes(alpha)
-    alpha = _color_guided_cleanup(rgb, alpha)
-
-    panels = []
-    for key, label, desc, shadow_fn in _SHADOW_VARIANTS:
-        placed = _place_subject(rgb, alpha, shadow_fn=shadow_fn)
-        img = placed[0] if placed is not None else _blank_canvas()
-        panels.append((key, label, desc, img))
-
-    log.info("make_listing_variants: done in %.2f s", time.perf_counter() - t_total)
-    return panels, None
 
 
 # ── text overlay + composition ─────────────────────────────────────────────────
@@ -1045,6 +827,15 @@ def fit_to_ratio(img: Image.Image, ratio: str) -> Image.Image:
     return canvas
 
 
+def cover_to_ratio(img: Image.Image, ratio: str) -> Image.Image:
+    """Cover-fit img to the target ratio: scale to fill, centre-crop overflow.
+
+    Used for Cover-mode scenes — the generated environment should fill the
+    frame edge-to-edge (no padded bars), unlike fit_to_ratio's padding.
+    """
+    return ImageOps.fit(img, _ratio_dims(ratio), Image.LANCZOS)
+
+
 def _ratio_dims(ratio: str, base: int = 1600) -> tuple:
     """(W, H) for the target ratio, with the shorter side fixed at `base`."""
     ar = _RATIO_AR.get(ratio, 1.0)
@@ -1134,6 +925,187 @@ def compose(result: Image.Image, subject_rgba, ratio: str,
             square = add_description_text(square, caption.strip(), subject_bottom)
         return fit_to_ratio(square, ratio)
     return compose_fullbleed(subject_rgba, ratio, orig_layer)
+
+
+# ── Testing 2: OpenAI white-frame + multiply composition ────────────────────────
+
+# Per-ratio zoom applied to the model frame before centring on the backdrop.
+# 4:5 enlarges 20% so the product fills that taller ratio; others contain-fit.
+_TESTING2_ZOOM = {"4:5": 1.2}
+
+# Cover mode: category → scene background in static/cover/. Explicit mapping —
+# the filenames don't follow a strict "<category> Background" rule (category 3
+# ships as just "Outdoor", and macOS stores the "/" in category 2 as ":").
+_COVER_BG = {
+    "Indoor Furniture": "Indoor Furniture Background.png",
+    "Large Electronics/Furniture": "Large Electronics:Furniture Background.png",
+    "Building Materials/Outdoor": "Outdoor Background.png",
+    "Lighting": "Lighting Background.png",
+    "Specialty": "Specialty Background.png",
+}
+
+
+@functools.lru_cache(maxsize=8)
+def _load_cover_bg(category: str):
+    """Scene background PNG for one cover category, or None if missing."""
+    name = _COVER_BG.get(category)
+    if not name:
+        return None
+    path = os.path.join(_BASE_DIR, "static", "cover", name)
+    if not os.path.exists(path):
+        return None
+    try:
+        return ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+    except Exception:
+        return None
+
+
+def make_cover(pil_img: Image.Image):
+    """Cover mode: classify the product, then compose it into that category's
+    scene via gpt-image-2 (original photo + scene background + fixed prompt).
+
+    Bypasses the white-plate/multiply path entirely — the model's scene output
+    IS the result. Returns (cover_pil_rgb, category, warn); on failure the
+    first element is None.
+    """
+    from . import openai_engine
+
+    log.info("make_cover: start input=%dx%d", pil_img.width, pil_img.height)
+    t_total = time.perf_counter()
+
+    category = openai_engine.classify_category(pil_img)
+    bg = _load_cover_bg(category)
+    if bg is None:
+        return None, category, f"cover background missing for {category}"
+
+    scene, warn = openai_engine.cover_scene(pil_img, bg, category)
+    if scene is None:
+        return None, category, warn
+
+    log.info("make_cover: done in %.2f s category=%s out=%dx%d",
+             time.perf_counter() - t_total, category, scene.width, scene.height)
+    return scene.convert("RGB"), category, None
+
+
+def make_listing_openai(pil_img: Image.Image):
+    """Testing-2 builder: OpenAI white-bg + studio shadow → full frame for multiply.
+
+    Flow: gpt-image-2 remove-bg/shadow → optional ESRGAN upscale. The whole
+    model output is kept — no crop, no exposure/contrast/white edits — so its
+    centred composition and balanced whitespace survive intact; compose_testing2
+    contain-fits and centres it on the backdrop. Returns (frame_rgb, warn), an
+    HxWx3 uint8 white-background image, or (None, warn) on failure.
+    """
+    from . import openai_engine
+
+    log.info("make_listing_openai: start input=%dx%d", pil_img.width, pil_img.height)
+    t_total = time.perf_counter()
+
+    white, warn = openai_engine.white_bg_with_shadow(pil_img)
+    if white is None:
+        return None, warn or "OpenAI could not process this image."
+
+    rgb = np.array(white.convert("RGB"))
+    if max(rgb.shape[:2]) < _UPSCALE_BELOW and _ESRGAN_ENABLED:
+        rgb, _ = _esrgan_upscale(rgb)
+
+    log.info("make_listing_openai: done in %.2f s frame=%dx%d",
+             time.perf_counter() - t_total, rgb.shape[1], rgb.shape[0])
+    return rgb, None
+
+
+def compose_testing2(plate: np.ndarray, ratio: str) -> Image.Image:
+    """Multiply the full gpt-image-2 frame onto the CJ product backdrop.
+
+    The whole model frame is contain-fitted (all of its content stays visible)
+    and centred on the backdrop, then multiply-blended — pure-white areas leave
+    the backdrop untouched, only the product and its shadow darken it. Because
+    the model already centres the product with balanced whitespace, centring the
+    frame keeps the product centred while preserving its full composition.
+
+    4:5 gets a 20% enlargement (`_TESTING2_ZOOM`) so the product isn't dwarfed
+    by that ratio's extra height; the enlarged frame is centred with the
+    overflow clipped to the canvas.
+    """
+    W, H = _ratio_dims(ratio)
+    bg = load_product_bg()
+    if bg is not None:
+        canvas = np.array(ImageOps.fit(bg, (W, H), Image.LANCZOS))
+    else:
+        canvas = np.full((H, W, 3), [253, 253, 242], dtype=np.uint8)  # #FDFDF2
+
+    ph, pw = plate.shape[:2]
+    s = min(W / pw, H / ph) * _TESTING2_ZOOM.get(ratio, 1.0)   # contain-fit × per-ratio zoom
+    nw, nh = max(1, round(pw * s)), max(1, round(ph * s))
+    if (nw, nh) != (pw, ph):
+        plate = cv2.resize(plate, (nw, nh), interpolation=cv2.INTER_LANCZOS4)
+
+    # Centre the (possibly oversized) frame, clipping any overflow to the canvas.
+    ox, oy = (W - nw) // 2, (H - nh) // 2
+    cy0, cy1 = max(0, oy), min(H, oy + nh)
+    cx0, cx1 = max(0, ox), min(W, ox + nw)
+    py0, px0 = cy0 - oy, cx0 - ox
+    top = plate[py0:py0 + (cy1 - cy0), px0:px0 + (cx1 - cx0)].astype(np.float32)
+    base = canvas[cy0:cy1, cx0:cx1].astype(np.float32)
+    canvas[cy0:cy1, cx0:cx1] = np.clip(base * top / 255.0, 0, 255).astype(np.uint8)
+
+    return Image.fromarray(canvas)
+
+
+def draw_dimensions(img: Image.Image, dims: list[dict]) -> Image.Image:
+    """Burn dimension annotations into an export image.
+
+    Mirrors DimensionOverlay.tsx: coordinates are normalized (0-1) over the
+    composed image; each dimension is a main line extended slightly past both
+    endpoints, perpendicular end caps, and the value label offset perpendicular
+    ("up") from the midpoint. The overlay's px constants (stroke 1.5, ext 8,
+    cap 5, gap 22, font 18) are relative to a ~760px on-screen preview, so they
+    scale with image width here. Drawn at 2x on a transparent layer and
+    downsampled for antialiasing.
+    """
+    if not dims:
+        return img
+    w, h = img.size
+    S = 2
+    layer = Image.new("RGBA", (w * S, h * S), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    color = (93, 94, 102, 255)                      # #5d5e66, same as the overlay
+    scale = (w / 760) * S
+    lw = max(2, round(1.5 * scale))
+    ext, cap, gap = 8 * scale, 5 * scale, 22 * scale
+    font = _load_font(max(12, round(18 * scale)), "Clean & Minimal")
+
+    for d in dims:
+        ax, ay = d["start"]["x"] * w * S, d["start"]["y"] * h * S
+        bx, by = d["end"]["x"] * w * S, d["end"]["y"] * h * S
+        dx, dy = bx - ax, by - ay
+        ln = math.hypot(dx, dy) or 1.0
+        ux, uy = dx / ln, dy / ln
+        a2 = (ax - ux * ext, ay - uy * ext)
+        b2 = (bx + ux * ext, by + uy * ext)
+        cvx, cvy = -uy * cap, ux * cap
+        nx, ny = -uy, ux
+        if ny > 0:                                   # perpendicular pointing "up"
+            nx, ny = -nx, -ny
+
+        draw.line([a2, b2], fill=color, width=lw)
+        draw.line([(a2[0] - cvx, a2[1] - cvy), (a2[0] + cvx, a2[1] + cvy)],
+                  fill=color, width=lw)
+        draw.line([(b2[0] - cvx, b2[1] - cvy), (b2[0] + cvx, b2[1] + cvy)],
+                  fill=color, width=lw)
+
+        value = (d.get("value") or "").strip()
+        if value:
+            mx = (ax + bx) / 2 + nx * gap
+            my = (ay + by) / 2 + ny * gap
+            bb = draw.textbbox((0, 0), value, font=font)
+            draw.text((mx - (bb[0] + bb[2]) / 2, my - (bb[1] + bb[3]) / 2),
+                      value, font=font, fill=color)
+
+    layer = layer.resize((w, h), Image.LANCZOS)
+    out = img.convert("RGBA")
+    out.alpha_composite(layer)
+    return out.convert("RGB")
 
 
 def to_png_bytes(img: Image.Image, optimize: bool = False) -> bytes:

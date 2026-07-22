@@ -11,8 +11,11 @@ const nextConfig: NextConfig = {
   // The /api/* rewrite proxies through Next, which buffers the request body
   // with a 10MB default cap — anything larger is silently truncated and the
   // proxied upload fails. Raise it to match the 200MB the upload UI advertises.
+  // proxyTimeout: gpt-image generations can run past the 30s default, which
+  // kills the socket mid-request ("network error" + a costly duplicate retry).
   experimental: {
     proxyClientMaxBodySize: "200mb",
+    proxyTimeout: 300_000,
   },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${backend}/api/:path*` }];

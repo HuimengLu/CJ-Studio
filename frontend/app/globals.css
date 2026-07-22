@@ -2,22 +2,521 @@
 
 /* ── CJ Studio design tokens (Lumina editorial monochrome) ─────────────────── */
 :root {
-  --bg: #f8f9fa;
-  --ink: #1b1b1b;
-  --ink-soft: #5d5e66;
-  --muted: #9a9a9a;
-  --line: #cfc4c5;
-  --line-soft: #e7e8e9;
-  --card: #ffffff;
-  --chip: #e1e3e4;
-  --chip-hover: #d4d6d7;
-  --panel: #f3f4f5;
+  /* Legacy vars, re-aliased onto the design system so every page (listing,
+     social, testing) picks up its colors and typography without touching each
+     rule. The old editorial serif is retired — everything renders in
+     --font-sans per the platform-console design. */
+  --bg: #ffffff;
+  --ink: var(--color-text);
+  --ink-soft: var(--color-text-secondary);
+  --muted: var(--color-text-tertiary);
+  --line: var(--color-border);
+  --line-soft: var(--color-border-subtle);
+  --card: var(--color-surface);
+  --chip: var(--color-gray-150);
+  --chip-hover: var(--color-gray-200);
+  --panel: var(--color-surface-secondary);
   --green: #005618;
-  --serif: var(--font-caslon), Georgia, serif;
-  --sans: var(--font-hanken), -apple-system, sans-serif;
+  --serif: var(--font-sans);
+  --sans: var(--font-sans);
+
+  /* ── Imported color design system ──────────────────────────────────────────
+     Semantic tokens (below) are the provided spec, verbatim. They reference a
+     base palette (grays / alphas / hues) that ships with the source system but
+     wasn't part of the spec — the values here are my placeholder estimates in
+     the same neutral style; adjust the base layer freely, the semantic layer
+     stays untouched. */
+
+  /* base: gray ramp (calibrated) */
+  --gray-0: #fff;
+  --gray-25: #fcfcfc;
+  --gray-50: #f9f9f9;
+  --gray-75: #f3f3f3;
+  --gray-100: #ededed;
+  --gray-150: #dfdfdf;
+  --gray-200: #cdcdcd;
+  --gray-250: #b9b9b9;
+  --gray-300: #afafaf;
+  --gray-350: #9f9f9f;
+  --gray-400: #8f8f8f;
+  --gray-450: #767676;
+  --gray-500: #5d5d5d;
+  --gray-550: #4f4f4f;
+  --gray-600: #414141;
+  --gray-650: #393939;
+  --gray-700: #303030;
+  --gray-750: #282828;
+  --gray-800: #212121;
+  --gray-850: #1c1c1c;
+  --gray-900: #181818;
+  --gray-925: #161616;
+  --gray-950: #131313;
+  --gray-975: #101010;
+  --gray-1000: #0d0d0d;
+  --white: #fff;
+  --black: #000;
+  --alpha-base: #0d0d0d;
+
+  /* base: alpha ramp (calibrated, oklab mixes of alpha-base) */
+  --alpha-0: color-mix(in oklab, var(--alpha-base) 0%, transparent);
+  --alpha-01: color-mix(in oklab, var(--alpha-base) 1%, transparent);
+  --alpha-02: color-mix(in oklab, var(--alpha-base) 2%, transparent);
+  --alpha-04: color-mix(in oklab, var(--alpha-base) 4%, transparent);
+  --alpha-05: color-mix(in oklab, var(--alpha-base) 5%, transparent);
+  --alpha-06: color-mix(in oklab, var(--alpha-base) 6%, transparent);
+  --alpha-08: color-mix(in oklab, var(--alpha-base) 8%, transparent);
+  --alpha-10: color-mix(in oklab, var(--alpha-base) 10%, transparent);
+  --alpha-12: color-mix(in oklab, var(--alpha-base) 12%, transparent);
+  --alpha-15: color-mix(in oklab, var(--alpha-base) 15%, transparent);
+  --alpha-16: color-mix(in oklab, var(--alpha-base) 16%, transparent);
+  --alpha-20: color-mix(in oklab, var(--alpha-base) 20%, transparent);
+  --alpha-25: color-mix(in oklab, var(--alpha-base) 25%, transparent);
+  --alpha-30: color-mix(in oklab, var(--alpha-base) 30%, transparent);
+  --alpha-35: color-mix(in oklab, var(--alpha-base) 35%, transparent);
+  --alpha-40: color-mix(in oklab, var(--alpha-base) 40%, transparent);
+  --alpha-50: color-mix(in oklab, var(--alpha-base) 50%, transparent);
+  --alpha-60: color-mix(in oklab, var(--alpha-base) 60%, transparent);
+  --alpha-70: color-mix(in oklab, var(--alpha-base) 70%, transparent);
+
+  /* base: hues (calibrated) */
+  --green-25: #edfaf2;
+  --green-50: #d9f4e4;
+  --green-75: #b8ebcc;
+  --green-100: #8cdfad;
+  --green-200: #66d492;
+  --green-300: #40c977;
+  --green-400: #04b84c;
+  --green-500: #00a240;
+  --green-600: #008635;
+  --green-700: #00692a;
+  --green-800: #004f1f;
+  --green-900: #003716;
+  --green-950: #011c0b;
+  --green-1000: #001207;
+  --green-a25: color-mix(in oklab, var(--green-400) 8%, transparent);
+  --green-a50: color-mix(in oklab, var(--green-400) 15%, transparent);
+  --green-a75: color-mix(in oklab, var(--green-400) 29%, transparent);
+  --green-a100: color-mix(in oklab, var(--green-400) 45%, transparent);
+  --green-a200: color-mix(in oklab, var(--green-400) 60%, transparent);
+  --green-a300: color-mix(in oklab, var(--green-400) 75%, transparent);
+  --red-25: #fff0f0;
+  --red-50: #ffd9d9;
+  --red-75: #ffc6c5;
+  --red-100: #ffa4a2;
+  --red-200: #ff8583;
+  --red-300: #ff6764;
+  --red-400: #fa423e;
+  --red-500: #e02e2a;
+  --red-600: #ba2623;
+  --red-700: #911e1b;
+  --red-800: #6e1615;
+  --red-900: #4d100e;
+  --red-950: #280b0a;
+  --red-1000: #1f0909;
+  --red-a25: color-mix(in oklab, var(--red-400) 8%, transparent);
+  --red-a50: color-mix(in oklab, var(--red-400) 16%, transparent);
+  --red-a75: color-mix(in oklab, var(--red-400) 30%, transparent);
+  --red-a100: color-mix(in oklab, var(--red-400) 48%, transparent);
+  --red-a200: color-mix(in oklab, var(--red-400) 64%, transparent);
+  --red-a300: color-mix(in oklab, var(--red-400) 79%, transparent);
+  --pink-25: #fff4f9;
+  --pink-50: #ffe8f3;
+  --pink-75: #ffd4e8;
+  --pink-100: #ffbada;
+  --pink-200: #ffa3ce;
+  --pink-300: #ff8cc1;
+  --pink-400: #ff66ad;
+  --pink-500: #e04c91;
+  --pink-600: #ba437a;
+  --pink-700: #963c67;
+  --pink-800: #6e2c4a;
+  --pink-900: #4d1f34;
+  --pink-950: #29101c;
+  --pink-1000: #1a0a11;
+  --pink-a25: color-mix(in oklab, var(--pink-400) 8%, transparent);
+  --pink-a50: color-mix(in oklab, var(--pink-400) 16%, transparent);
+  --pink-a75: color-mix(in oklab, var(--pink-400) 28%, transparent);
+  --pink-a100: color-mix(in oklab, var(--pink-400) 45%, transparent);
+  --pink-a200: color-mix(in oklab, var(--pink-400) 60%, transparent);
+  --pink-a300: color-mix(in oklab, var(--pink-400) 76%, transparent);
+  --orange-25: #fff5f0;
+  --orange-50: #ffe7d9;
+  --orange-75: #ffcfb4;
+  --orange-100: #ffb790;
+  --orange-200: #ff9e6c;
+  --orange-300: #ff8549;
+  --orange-400: #fb6a22;
+  --orange-500: #e25507;
+  --orange-600: #b9480d;
+  --orange-700: #923b0f;
+  --orange-800: #6d2e0f;
+  --orange-900: #4a2206;
+  --orange-950: #281105;
+  --orange-1000: #211107;
+  --orange-a25: color-mix(in oklab, var(--orange-400) 7%, transparent);
+  --orange-a50: color-mix(in oklab, var(--orange-400) 16%, transparent);
+  --orange-a75: color-mix(in oklab, var(--orange-400) 33%, transparent);
+  --orange-a100: color-mix(in oklab, var(--orange-400) 48%, transparent);
+  --orange-a200: color-mix(in oklab, var(--orange-400) 65%, transparent);
+  --orange-a300: color-mix(in oklab, var(--orange-400) 81%, transparent);
+  --yellow-25: #fffbed;
+  --yellow-50: #fff6d9;
+  --yellow-75: #ffeeb8;
+  --yellow-100: #ffe48c;
+  --yellow-200: #ffdb66;
+  --yellow-300: #ffd240;
+  --yellow-400: #ffc300;
+  --yellow-500: #e0ac00;
+  --yellow-600: #ba8e00;
+  --yellow-700: #916f00;
+  --yellow-800: #6e5400;
+  --yellow-900: #4d3b00;
+  --yellow-950: #261d00;
+  --yellow-1000: #1a1400;
+  --yellow-a25: color-mix(in oklab, var(--yellow-400) 8%, transparent);
+  --yellow-a50: color-mix(in oklab, var(--yellow-400) 15%, transparent);
+  --yellow-a75: color-mix(in oklab, var(--yellow-400) 27%, transparent);
+  --yellow-a100: color-mix(in oklab, var(--yellow-400) 45%, transparent);
+  --yellow-a200: color-mix(in oklab, var(--yellow-400) 59%, transparent);
+  --yellow-a300: color-mix(in oklab, var(--yellow-400) 74%, transparent);
+  --purple-25: #f9f5fe;
+  --purple-50: #efe5fe;
+  --purple-75: #e0cefd;
+  --purple-100: #ceb0fb;
+  --purple-200: #be95fa;
+  --purple-300: #ad7bf9;
+  --purple-400: #924ff7;
+  --purple-500: #8046d9;
+  --purple-600: #6b3ab4;
+  --purple-700: #532d8d;
+  --purple-800: #3f226a;
+  --purple-900: #2c184a;
+  --purple-950: #160c25;
+  --purple-1000: #100a19;
+  --purple-a25: color-mix(in oklab, var(--purple-400) 6%, transparent);
+  --purple-a50: color-mix(in oklab, var(--purple-400) 15%, transparent);
+  --purple-a75: color-mix(in oklab, var(--purple-400) 28%, transparent);
+  --purple-a100: color-mix(in oklab, var(--purple-400) 45%, transparent);
+  --purple-a200: color-mix(in oklab, var(--purple-400) 60%, transparent);
+  --purple-a300: color-mix(in oklab, var(--purple-400) 76%, transparent);
+  --blue-25: #f5faff;
+  --blue-50: #e5f3ff;
+  --blue-75: #cce6ff;
+  --blue-100: #99ceff;
+  --blue-200: #66b5ff;
+  --blue-300: #339cff;
+  --blue-400: #0285ff;
+  --blue-500: #0169cc;
+  --blue-600: #004f99;
+  --blue-700: #003f7a;
+  --blue-800: #013566;
+  --blue-900: #00284d;
+  --blue-950: #000e1a;
+  --blue-1000: #000d19;
+  --blue-a25: color-mix(in oklab, var(--blue-400) 4%, transparent);
+  --blue-a50: color-mix(in oklab, var(--blue-400) 13%, transparent);
+  --blue-a75: color-mix(in oklab, var(--blue-400) 25%, transparent);
+  --blue-a100: color-mix(in oklab, var(--blue-400) 40%, transparent);
+  --blue-a200: color-mix(in oklab, var(--blue-400) 60%, transparent);
+  --blue-a300: color-mix(in oklab, var(--blue-400) 80%, transparent);
+
+  /* base: shadow geometry (calibrated; struck-out --hairline omitted) */
+  --shadow-color: 0 0 0;
+  --elevation-100-geo: 0 1px 2px -1px;
+  --elevation-200-geo: 0 2px 4px -1px;
+  --elevation-300-geo: 0 4px 8px -2px;
+  --elevation-400-geo: 0 8px 16px -4px;
+
+  /* base: type scale + shadows + easing referenced by the theme layer */
+  --font-text-3xs-size: 10px;
+  --font-text-3xs-line-height: 12px;
+  --font-text-3xs-weight: 400;
+  --font-text-3xs-tracking: 0.01em;
+  --font-text-2xs-size: 11px;
+  --font-text-2xs-line-height: 14px;
+  --font-text-2xs-weight: 400;
+  --font-text-2xs-tracking: 0.005em;
+  --font-text-xs-size: 12px;
+  --font-text-xs-line-height: 16px;
+  --font-text-xs-weight: 400;
+  --font-text-xs-tracking: 0;
+  --font-text-sm-size: 14px;
+  --font-text-sm-line-height: 20px;
+  --font-text-sm-weight: 400;
+  --font-text-sm-tracking: 0;
+  --font-text-md-size: 16px;
+  --font-text-md-line-height: 24px;
+  --font-text-md-weight: 400;
+  --font-text-md-tracking: 0;
+  --font-text-lg-size: 18px;
+  --font-text-lg-line-height: 26px;
+  --font-text-lg-weight: 400;
+  --font-text-lg-tracking: -0.005em;
+  --font-heading-md-size: 20px;
+  --font-heading-md-line-height: 28px;
+  --font-heading-md-tracking: -0.01em;
+  --font-heading-lg-size: 24px;
+  --font-heading-lg-line-height: 32px;
+  --font-heading-lg-tracking: -0.01em;
+  --font-heading-xl-size: 30px;
+  --font-heading-xl-line-height: 36px;
+  --font-heading-xl-tracking: -0.015em;
+  --font-tracking-wide: 0.025em;
+  --font-tracking-normal: 0;
+  --font-tracking-tight: -0.01em;
+  /* composed from the calibrated elevation geometry; the shadow alpha wasn't
+     in the spec — 10% is an assumption, adjust when known */
+  --shadow-200: var(--elevation-200-geo) rgb(var(--shadow-color) / 0.1);
+  --transition-ease-basic: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* theme layer (spec, verbatim; #1's unbalanced quote fixed, struck-out #81 omitted) */
+  --font-sans: "CJ Studio Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "SF Mono", "SFMono-Regular", ui-monospace, consolas, liberation mono, menlo, monospace;
+  --spacing: .25rem;
+  --breakpoint-sm: 576px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+  --container-xs: 20rem;
+  --container-sm: 24rem;
+  --container-md: 28rem;
+  --container-lg: 32rem;
+  --container-2xl: 42rem;
+  --container-3xl: 48rem;
+  --container-4xl: 56rem;
+  --container-6xl: 72rem;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+  --animate-spin: spin 1s linear infinite;
+  --animate-ping: ping 1s cubic-bezier(0, 0, .2, 1) infinite;
+  --default-transition-duration: .15s;
+  --default-transition-timing-function: cubic-bezier(.4, 0, .2, 1);
+  --default-font-family: var(--font-sans);
+  --default-mono-font-family: var(--font-mono);
+  --breakpoint-xs: 380px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --radius-2xs: .125rem;
+  --radius-xs: .25rem;
+  --radius-sm: .375rem;
+  --radius-md: .5rem;
+  --radius-lg: .625rem;
+  --radius-xl: .75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.25rem;
+  --radius-4xl: 1.5rem;
+  --radius-full: 9999px;
+  --text-lg: var(--font-text-lg-size);
+  --text-lg--line-height: var(--font-text-lg-line-height);
+  --text-lg--font-weight: var(--font-text-lg-weight);
+  --text-lg--letter-spacing: var(--font-text-lg-tracking);
+  --text-base: var(--font-text-md-size);
+  --text-base--line-height: var(--font-text-md-line-height);
+  --text-base--font-weight: var(--font-text-md-weight);
+  --text-base--letter-spacing: var(--font-text-md-tracking);
+  --text-sm: var(--font-text-sm-size);
+  --text-sm--line-height: var(--font-text-sm-line-height);
+  --text-sm--font-weight: var(--font-text-sm-weight);
+  --text-sm--letter-spacing: var(--font-text-sm-tracking);
+  --text-xs: var(--font-text-xs-size);
+  --text-xs--line-height: var(--font-text-xs-line-height);
+  --text-xs--font-weight: var(--font-text-xs-weight);
+  --text-xs--letter-spacing: var(--font-text-xs-tracking);
+  --text-2xs: var(--font-text-2xs-size);
+  --text-2xs--line-height: var(--font-text-2xs-line-height);
+  --text-2xs--font-weight: var(--font-text-2xs-weight);
+  --text-2xs--letter-spacing: var(--font-text-2xs-tracking);
+  --text-3xs: var(--font-text-3xs-size);
+  --text-3xs--line-height: var(--font-text-3xs-line-height);
+  --text-3xs--font-weight: var(--font-text-3xs-weight);
+  --text-3xs--letter-spacing: var(--font-text-3xs-tracking);
+  --text-xl: var(--font-heading-md-size);
+  --text-xl--line-height: var(--font-heading-md-line-height);
+  --text-xl--font-weight: var(--font-text-lg-weight);
+  --text-xl--letter-spacing: var(--font-heading-md-tracking);
+  --text-2xl: var(--font-heading-lg-size);
+  --text-2xl--line-height: var(--font-heading-lg-line-height);
+  --text-2xl--font-weight: var(--font-text-lg-weight);
+  --text-2xl--letter-spacing: var(--font-heading-lg-tracking);
+  --text-3xl: var(--font-heading-xl-size);
+  --text-3xl--line-height: var(--font-heading-xl-line-height);
+  --text-3xl--font-weight: var(--font-text-lg-weight);
+  --text-3xl--letter-spacing: var(--font-heading-xl-tracking);
+  --tracking-wide: var(--font-tracking-wide);
+  --tracking-normal: var(--font-tracking-normal);
+  --tracking-tight: var(--font-tracking-tight);
+  --shadow-md: var(--shadow-200);
+  --color-gray-0: var(--gray-0);
+  --color-gray-50: var(--gray-50);
+  --color-gray-75: var(--gray-75);
+  --color-gray-100: var(--gray-100);
+  --color-gray-150: var(--gray-150);
+  --color-gray-200: var(--gray-200);
+  --color-gray-300: var(--gray-300);
+  --color-gray-350: var(--gray-350);
+  --color-gray-400: var(--gray-400);
+  --color-gray-500: var(--gray-500);
+  --color-gray-600: var(--gray-600);
+  --color-gray-700: var(--gray-700);
+  --color-gray-800: var(--gray-800);
+  --color-gray-900: var(--gray-900);
+  --color-gray-1000: var(--gray-1000);
+  --color-green-50: var(--green-50);
+  --color-green-400: var(--green-400);
+  --color-green-500: var(--green-500);
+  --color-green-600: var(--green-600);
+  --color-green-700: var(--green-700);
+  --color-red-50: var(--red-50);
+  --color-red-200: var(--red-200);
+  --color-red-400: var(--red-400);
+  --color-red-500: var(--red-500);
+  --color-red-600: var(--red-600);
+  --color-orange-500: var(--orange-500);
+  --color-yellow-25: var(--yellow-25);
+  --color-yellow-50: var(--yellow-50);
+  --color-yellow-100: var(--yellow-100);
+  --color-yellow-200: var(--yellow-200);
+  --color-yellow-500: var(--yellow-500);
+  --color-yellow-700: var(--yellow-700);
+  --color-yellow-900: var(--yellow-900);
+  --color-yellow-1000: var(--yellow-1000);
+  --color-blue-50: var(--blue-50);
+  --color-blue-100: var(--blue-100);
+  --color-blue-200: var(--blue-200);
+  --color-blue-400: var(--blue-400);
+  --color-blue-500: var(--blue-500);
+  --color-blue-600: var(--blue-600);
+  --color-blue-700: var(--blue-700);
+  --color-blue-800: var(--blue-800);
+  --color-alpha: var(--alpha-base);
+  --color-white: var(--white);
+  --color-black: var(--black);
+  --ease-basic: var(--transition-ease-basic);
+
+  /* semantic tokens (spec, verbatim) */
+  --color-text: var(--gray-750);
+  --color-text-secondary: var(--gray-500);
+  --color-text-tertiary: var(--gray-400);
+  --color-ring: var(--blue-500);
+  --color-background-primary-soft: var(--gray-100);
+  --color-background-primary-soft-hover: var(--gray-150);
+  --color-background-primary-soft-active: var(--gray-200);
+  --color-background-primary-soft-alpha: var(--alpha-08);
+  --color-background-primary-soft-alpha-hover: var(--alpha-12);
+  --color-background-primary-soft-alpha-active: var(--alpha-16);
+  --color-background-primary-surface: var(--alpha-05);
+  --color-border-primary-surface: var(--alpha-05);
+  --color-background-primary-solid: var(--gray-900);
+  --color-background-primary-solid-hover: var(--gray-700);
+  --color-background-primary-solid-active: var(--gray-600);
+  --color-background-primary-outline-hover: var(--alpha-02);
+  --color-background-primary-outline-active: var(--alpha-04);
+  --color-border-primary-outline: var(--alpha-16);
+  --color-border-primary-outline-hover: var(--alpha-20);
+  --color-background-primary-ghost-hover: var(--alpha-08);
+  --color-background-primary-ghost-active: var(--alpha-12);
+  --color-background-secondary-soft: var(--gray-100);
+  --color-background-secondary-soft-hover: var(--gray-150);
+  --color-background-secondary-soft-active: var(--gray-200);
+  --color-background-secondary-soft-alpha: var(--alpha-08);
+  --color-background-secondary-soft-alpha-hover: var(--alpha-12);
+  --color-background-secondary-soft-alpha-active: var(--alpha-16);
+  --color-background-secondary-solid: var(--gray-500);
+  --color-background-secondary-solid-hover: var(--gray-600);
+  --color-background-secondary-solid-active: var(--gray-700);
+  --color-background-secondary-outline-hover: var(--alpha-02);
+  --color-background-secondary-outline-active: var(--alpha-04);
+  --color-border-secondary-outline: var(--alpha-16);
+  --color-border-secondary-outline-hover: var(--alpha-20);
+  --color-background-secondary-ghost-hover: var(--alpha-08);
+  --color-background-secondary-ghost-active: var(--alpha-12);
+  --color-text-info: var(--blue-500);
+  --color-text-info-soft: var(--blue-600);
+  --color-background-info-surface: var(--blue-a25);
+  --color-border-info-surface: var(--blue-a25);
+  --color-text-info-surface: var(--blue-600);
+  --color-text-info-ghost: var(--blue-500);
+  --color-text-info-ghost-hover: var(--blue-500);
+  --color-text-warning: var(--orange-700);
+  --color-text-warning-soft: var(--orange-700);
+  --color-background-warning-surface: var(--orange-a25);
+  --color-text-caution: var(--yellow-700);
+  --color-text-caution-soft: var(--yellow-800);
+  --color-background-caution-surface: var(--yellow-a25);
+  --color-border-caution-surface: var(--yellow-a25);
+  --color-text-caution-surface: var(--yellow-800);
+  --color-text-danger: var(--red-700);
+  --color-text-danger-soft: var(--red-600);
+  --color-background-danger-surface: var(--red-a25);
+  --color-border-danger-surface: var(--red-a25);
+  --color-text-danger-surface: var(--red-600);
+  --color-text-success: var(--green-700);
+  --color-text-success-soft: var(--green-600);
+  --color-background-success-surface: var(--green-a25);
+  --color-border-success-surface: var(--green-a25);
+  --color-text-success-surface: var(--green-600);
+  --color-background-success-solid: var(--green-500);
+  --color-background-success-solid-hover: var(--green-500);
+  --color-background-success-solid-active: var(--green-500);
+  --color-border-success-outline: var(--green-500);
+  --color-border-success-outline-hover: var(--green-500);
+  --color-text-discovery: var(--purple-700);
+  --color-text-discovery-soft: var(--purple-600);
+  --color-background-discovery-surface: var(--purple-a25);
+  --color-border-discovery-surface: var(--purple-a25);
+  --color-text-discovery-surface: var(--purple-600);
+  --color-text-discovery-outline: var(--purple-500);
+  --color-text-discovery-outline-hover: var(--purple-500);
+  --color-text-disabled: var(--gray-400);
+  --color-border-subtle: var(--alpha-05);
+  --color-border: var(--alpha-10);
+  --color-border-strong: var(--alpha-15);
+  --shadow: 0 10px 15px -3px #0000001a, 0 4px 6px -4px #0000001a;
+  --color-surface: var(--gray-0);
+  --color-surface-secondary: var(--gray-50);
+  --color-surface-tertiary: var(--gray-75);
+  --color-surface-elevated: var(--gray-0);
+  --color-surface-elevated-secondary: var(--gray-50);
+  --avatar-image-border-color: var(--alpha-04);
+  --input-outline-border-color-hover: var(--alpha-25);
+  --input-border-color-invalid: var(--red-500);
+  --link-primary-text-color: var(--blue-500);
+  --link-primary-text-color-hover: var(--blue-800);
+  --user-message-background-color: var(--alpha-05);
+  --codeblock-syntax-1: #c0660d;
+  --codeblock-syntax-2: var(--blue-500);
+  --codeblock-syntax-3: var(--green-600);
+  --codeblock-syntax-5: var(--purple-500);
+  --menu-item-background-color: var(--alpha-08);
+  --modal-backdrop-background: #0000004d;
+  --modal-backdrop-fade-background: #f2f2f280;
+  --segmented-control-background: var(--gray-100);
+  --segmented-control-thumb-background: var(--gray-0);
+  --segmented-control-option-highlight-background-color: var(--gray-200);
+  --slider-track-color: var(--gray-150);
+  --slider-range-color: var(--gray-450);
+  --switch-track-color: var(--gray-150);
+  --switch-track-color-hover: var(--gray-200);
+  --switch-track-color-checked: var(--gray-900);
+  --switch-track-color-checked-disabled: var(--gray-300);
+  --switch-track-color-disabled: var(--gray-100);
+  --switch-thumb-color: var(--gray-0);
+  --switch-thumb-color-disabled: var(--gray-0);
 }
 
 * { box-sizing: border-box; }
+
+/* One focus treatment everywhere: keyboard focus gets the design-system ring,
+   mouse clicks don't flash outlines (that's what :focus-visible gives us). */
+:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-2xs);
+}
 
 html, body { height: 100%; }
 
@@ -40,104 +539,292 @@ body {
   font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
 }
 
-/* ── App shell: fixed left sidebar ─────────────────────────────────────────── */
-.cj-main { margin-left: 256px; min-height: 100vh; }
+/* ── App shell: fixed left sidebar (platform-console style) ────────────────── */
+.cj-main { margin-left: 260px; min-height: 100vh; }
+
+/* ── Page title bar (platform-console spec: 12px 24px padding, hairline
+      bottom border, 20px/32px semibold title → 57px tall, sticky) ─────────── */
+:root { --cj-pagebar-h: 57px; }
+.cj-pagebar {
+  /* above page-level floating chrome (.cj-soc-head z40), below the sidebar (50) */
+  position: sticky; top: 0; z-index: 45;
+  padding: 12px 24px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border-primary-surface);
+  font-family: var(--font-sans);
+}
+.cj-pagebar h1 {
+  margin: 0; font-size: var(--text-xl); line-height: 32px;
+  font-weight: var(--font-weight-semibold); color: var(--color-text);
+  letter-spacing: var(--text-xl--letter-spacing);
+}
 
 #cj-side {
-  position: fixed; left: 0; top: 0; bottom: 0; width: 256px; z-index: 50;
-  background: var(--panel); border-right: 1px solid var(--line);
-  display: flex; flex-direction: column; padding: 16px;
+  position: fixed; left: 0; top: 0; width: 260px; height: 100vh; z-index: 50;
+  background: var(--color-surface-tertiary);
+  display: flex; flex-direction: column; padding: 8px;
+  font-family: var(--font-sans);
 }
 #cj-side .cj-brand {
-  font-family: var(--serif); font-size: 1.55rem; color: var(--ink);
-  letter-spacing: -0.01em; line-height: 1.1; padding: 8px 16px;
-}
-#cj-side .cj-brand small {
-  display: block; font-family: var(--sans); font-size: 0.58rem; font-weight: 300;
-  letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-soft);
+  height: 32px; display: flex; align-items: center; padding: 0 12px;
   margin-top: 8px;
+  font-size: 16px; font-weight: var(--font-weight-semibold); color: var(--color-text);
 }
-#cj-side .cj-navcol { display: flex; flex-direction: column; gap: 4px; margin-top: 32px; flex-grow: 1; }
+#cj-side .cj-navcol { display: flex; flex-direction: column; margin-top: 16px; flex-grow: 1; }
+/* Nav item states live on a ::before layer (source DOM pattern): the pill
+   fades in via opacity and presses with a scale(0.96) — content sits above. */
 #cj-side a.cj-item {
-  display: flex; align-items: center; gap: 12px; padding: 8px 16px;
-  border-radius: 8px; text-decoration: none; font-size: 0.85rem;
-  color: var(--ink-soft); font-weight: 300; transition: background 0.15s, color 0.15s;
+  position: relative;
+  height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  border-radius: var(--radius-lg); text-decoration: none;
+  font-size: var(--text-sm); letter-spacing: var(--text-sm--letter-spacing);
+  font-weight: var(--font-weight-normal);
+  color: var(--color-text);
 }
-#cj-side a.cj-item .ms { font-size: 20px; }
-#cj-side a.cj-item:hover { background: var(--line-soft); color: var(--ink); }
-#cj-side a.cj-item.active { background: var(--ink); color: #fff; font-weight: 400; }
+#cj-side a.cj-item::before {
+  content: ""; position: absolute; inset: 0; border-radius: var(--radius-lg);
+  background: var(--alpha-05); opacity: 0; transform: scale(1);
+  will-change: opacity, transform;
+  transition: opacity var(--default-transition-duration) var(--default-transition-timing-function),
+              transform var(--default-transition-duration) var(--default-transition-timing-function),
+              background-color var(--default-transition-duration) var(--default-transition-timing-function);
+}
+#cj-side a.cj-item > * { position: relative; }
+#cj-side a.cj-item .ms { font-size: 20px; width: 20px; }
+/* label truncates instead of wrapping (source: .SjyEm) */
+#cj-side a.cj-item > span:last-child {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+/* state ramp: hover < selected < pressed */
+#cj-side a.cj-item:hover::before { opacity: 1; }
+#cj-side a.cj-item.active::before { opacity: 1; background: var(--alpha-08); }
+#cj-side a.cj-item:active::before { opacity: 1; background: var(--alpha-12); transform: scale(0.96); }
 #cj-side a.cj-item.active .ms { font-variation-settings: "FILL" 1; }
+/* Archived tools (Legacy Listing): present but visually demoted. */
+#cj-side a.cj-item-muted { color: var(--color-text-secondary); }
+#cj-side a.cj-item-muted.active { color: var(--color-text); }
+
+/* Tooltip card (spec: white card, 12px padding, alpha-08 hairline, 6px radius,
+   elevation-200 shadow at 8%; 14px title + 12px secondary line, 6px gap).
+   Appears 0.1s after hover, hides immediately on leave. */
+.cj-tipwrap { position: relative; }
+.cj-tooltip {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: calc(100% + 6px); z-index: 60;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  width: max-content; max-width: 236px; padding: 12px;
+  background: var(--color-gray-0);
+  border: 1px solid var(--alpha-08);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--elevation-200-geo) rgb(var(--shadow-color) / 0.08);
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity var(--default-transition-duration) var(--default-transition-timing-function),
+              visibility 0s linear var(--default-transition-duration);
+}
+.cj-tipwrap:hover .cj-tooltip {
+  opacity: 1; visibility: visible;
+  transition-delay: 0.1s, 0.1s;
+}
+.cj-tooltip-title { font-size: var(--text-sm); line-height: 20px; color: var(--color-gray-1000); }
+.cj-tooltip-desc { font-size: var(--text-xs); line-height: 18px; color: var(--color-text-secondary); }
+
+/* ── Mobile top app bar (hidden on desktop, replaces the sidebar ≤900px) ──── */
+#cj-topbar { display: none; }
 
 @media (max-width: 900px) {
   #cj-side { display: none; }
-  .cj-main { margin-left: 0; }
+  /* The active tab names the page — the per-page title bar would duplicate it. */
+  .cj-pagebar { display: none; }
+  #cj-topbar {
+    display: flex; align-items: center; gap: 2px;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 60;
+    padding: env(safe-area-inset-top) 8px 0 16px;
+    height: calc(52px + env(safe-area-inset-top));
+    background: var(--bg);
+    border-bottom: 1px solid var(--color-border-primary-surface);
+  }
+  .cj-top-brand {
+    font-size: 15px; font-weight: 600; color: var(--color-text);
+    margin-right: auto; white-space: nowrap;
+  }
+  .cj-top-item {
+    display: flex; align-items: center; gap: 5px;
+    height: 40px; padding: 0 10px; border-radius: var(--radius-lg);
+    font-size: 13px; line-height: 1; white-space: nowrap;
+    color: var(--color-text-secondary); text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .cj-top-item svg { width: 18px; height: 18px; flex: 0 0 auto; }
+  .cj-top-item.active { color: var(--color-text); background: var(--alpha-08); }
+  .cj-top-item:active { background: var(--alpha-12); }
+  .cj-top-legacy { padding: 0 8px; color: var(--color-text-secondary); }
+  /* Fixed bar → push the app below it. */
+  .cj-main { margin-left: 0; padding-top: calc(52px + env(safe-area-inset-top)); }
 }
 
-/* ── Shared buttons ────────────────────────────────────────────────────────── */
+/* ── Shared buttons (design-system solid / outline) ────────────────────────── */
 .cj-btn-primary, .cj-btn-outline {
-  display: block; width: 100%; text-align: center; cursor: pointer;
-  font-family: var(--sans); font-size: 14px; line-height: 20px; font-weight: 600;
-  letter-spacing: 1.4px; text-transform: uppercase; border-radius: 0;
+  display: block; width: 100%; height: 40px; text-align: center; cursor: pointer;
+  font-family: var(--font-sans); font-size: var(--text-sm); line-height: 20px;
+  font-weight: var(--font-weight-medium); border-radius: var(--radius-lg);
+  transition: background var(--default-transition-duration) var(--default-transition-timing-function);
 }
-.cj-btn-primary { background: #000; color: #fff; padding: 16px; border: none; }
-.cj-btn-primary:hover { opacity: 0.9; }
-.cj-btn-primary:disabled { background: #c9cbcd; color: var(--panel); cursor: not-allowed; opacity: 1; }
-.cj-btn-outline { background: transparent; color: #000; border: 1px solid #7e7576; padding: 15px 1px; }
-.cj-btn-outline:hover { background: var(--bg); }
+.cj-btn-primary { background: var(--color-background-primary-solid); color: var(--color-white); border: none; }
+.cj-btn-primary:hover { background: var(--color-background-primary-solid-hover); }
+.cj-btn-primary:disabled { background: var(--color-gray-300); color: var(--color-white); cursor: not-allowed; }
+.cj-btn-outline {
+  background: transparent; color: var(--color-text);
+  border: 1px solid var(--color-border-primary-outline);
+}
+.cj-btn-outline:hover {
+  background: var(--color-background-primary-outline-hover);
+  border-color: var(--color-border-primary-outline-hover);
+}
+.cj-btn-outline:disabled {
+  color: var(--color-text-disabled); background: transparent;
+  border-color: var(--color-border-primary-outline); cursor: not-allowed;
+}
+/* Pressed/engaged mode (e.g. while placing dimension points). */
+.cj-btn-outline.active {
+  background: var(--color-background-primary-outline-active);
+  border-color: var(--color-border-primary-outline-hover);
+}
+
+/* Vertical stack of action buttons (Add Dimensions, Generate Cover…). Top
+   breathing room now comes from .cj-grp's own padding. */
+.cj-actions { display: flex; flex-direction: column; }
+
+/* Floating notice over the result stage (global errors: session expiry etc.) */
+.cj-result { position: relative; }
+.cj-warn-float {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  z-index: 60; margin: 0; max-width: min(560px, 70%);
+  box-shadow: var(--shadow);
+}
+
+/* Content badges on export-selection tiles (cover / dimension count). */
+.cj-ex-flags { position: absolute; left: 8px; bottom: 8px; display: flex; gap: 4px; }
+.cj-ex-flag {
+  font-size: var(--text-3xs); line-height: 1; padding: 3px 6px;
+  border-radius: var(--radius-xs); background: rgba(255, 255, 255, 0.85);
+  color: var(--color-text); font-weight: var(--font-weight-medium);
+}
+
+/* "New cover ready" dot on a filmstrip thumb (top-left; ✕ owns the top-right). */
+.cj-newdot {
+  position: absolute; top: -3px; left: -3px; width: 10px; height: 10px;
+  border-radius: var(--radius-full); background: var(--color-blue-400);
+  border: 2px solid var(--color-surface); z-index: 2;
+}
+
+/* Undo toast for soft-deleted photos. */
+.cj-undo {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  z-index: 130; display: flex; align-items: center; gap: 16px;
+  padding: 10px 16px; border-radius: var(--radius-lg);
+  background: var(--color-background-primary-solid); color: var(--color-white);
+  font-size: var(--text-sm); box-shadow: var(--shadow);
+  animation: cj-detail-in 0.2s var(--default-transition-timing-function);
+}
+.cj-undo button {
+  border: none; background: none; padding: 0; cursor: pointer;
+  color: var(--color-white); font-family: var(--font-sans);
+  font-size: var(--text-sm); font-weight: var(--font-weight-semibold);
+}
+.cj-undo button:hover { text-decoration: underline; }
 
 /* ── Home (upload) screen ──────────────────────────────────────────────────── */
 .cj-home { max-width: 880px; margin: 0 auto; padding: 2rem 1.5rem 3rem; }
 .cj-home-top { height: 3.5rem; }
 
 .cj-drop {
-  position: relative; min-height: 380px; border: 2px dashed var(--line);
-  background: rgba(255, 255, 255, 0.5); display: flex; flex-direction: column;
+  position: relative; min-height: 380px; border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-2xl); background: var(--color-surface);
+  display: flex; flex-direction: column;
   align-items: center; justify-content: center; overflow: hidden; cursor: pointer;
   transition: border-color 0.3s ease, background-color 0.3s ease;
 }
-.cj-drop:hover, .cj-drop.dragover { border-color: #000; background: rgba(0, 0, 0, 0.02); }
-.cj-drop::before {
-  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.025;
-  background-image: radial-gradient(#000 1px, transparent 1px);
-  background-size: 24px 24px;
+.cj-drop:hover, .cj-drop.dragover {
+  border-color: var(--input-outline-border-color-hover);
+  background: var(--color-background-primary-outline-hover);
 }
 .cj-drop-icon {
-  font-size: 40px; color: var(--ink); width: 80px; height: 80px; border-radius: 50%;
-  background: #edeeef; display: flex; align-items: center; justify-content: center;
-  margin-bottom: 24px; transition: background 0.3s, color 0.3s;
+  color: var(--color-text); width: 80px; height: 80px; border-radius: var(--radius-full);
+  background: var(--color-background-primary-soft); display: flex; align-items: center;
+  justify-content: center; margin-bottom: 24px; transition: background 0.3s, color 0.3s;
 }
-.cj-drop:hover .cj-drop-icon { background: var(--ink); color: #fff; }
-.cj-drop-title { font-family: var(--serif); font-size: 1.8rem; color: var(--ink); }
+.cj-drop:hover .cj-drop-icon { background: var(--color-background-primary-solid); color: var(--color-white); }
+.cj-drop-title {
+  font-size: var(--text-lg); line-height: var(--text-lg--line-height);
+  font-weight: var(--font-weight-semibold); color: var(--color-text);
+}
 .cj-drop-hint {
-  font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--ink-soft); font-weight: 300; margin-top: 14px;
+  font-size: var(--text-xs); color: var(--color-text-tertiary); margin-top: 8px;
+}
+/* Section header row with a right-aligned character counter. */
+.cj-sec-row { display: flex; align-items: center; justify-content: space-between; }
+.cj-sec-row .cj-sec { margin: 0; }
+
+/* One field: label above its control, 8px apart. Fields are the single label
+   pattern across every panel (ratio, colors, inputs, toggles, image). */
+.cj-field { display: flex; flex-direction: column; gap: 8px; }
+.cj-label {
+  font-family: var(--font-sans); font-size: var(--text-sm); line-height: 20px;
+  font-weight: var(--font-weight-medium); color: var(--color-text);
+}
+.cj-count {
+  font-size: var(--text-2xs); color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Render-failure notice floated over the preview stage. */
+.cj-stage-err {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 9; margin: 0; white-space: nowrap;
+}
+
+/* Helper caption below the upload card — quiet meta info, outside the card. */
+.cj-drop-note {
+  font-size: var(--text-xs); color: var(--color-text-tertiary);
+  text-align: center; margin-top: 12px;
 }
 
 .cj-strip {
   display: flex; justify-content: center; align-items: center; gap: 2.5rem;
-  flex-wrap: wrap; border-top: 1px solid var(--line); margin-top: 3rem;
-  padding-top: 1.6rem; opacity: 0.6; transition: opacity 0.3s;
+  flex-wrap: wrap; border-top: 1px solid var(--color-border-subtle); margin-top: 3rem;
+  padding-top: 1.5rem;
 }
-.cj-strip:hover { opacity: 1; }
-.cj-step { display: flex; align-items: center; gap: 0.75rem; }
+.cj-step { display: flex; align-items: center; gap: 8px; }
 .cj-num {
-  width: 24px; height: 24px; border-radius: 50%; background: var(--line-soft);
-  color: var(--ink); display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 600;
+  width: 24px; height: 24px; border-radius: var(--radius-full);
+  background: var(--color-background-primary-soft); color: var(--color-text);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--text-2xs); font-weight: var(--font-weight-semibold);
 }
-.cj-steplbl { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-soft); font-weight: 300; }
-.cj-dash { color: var(--line); }
+.cj-steplbl { font-size: var(--text-xs); color: var(--color-text-secondary); font-weight: var(--font-weight-medium); }
+.cj-dash { color: var(--color-border-strong); }
+.cj-step .cj-num, .cj-step .cj-steplbl {
+  transition: background var(--default-transition-duration) var(--default-transition-timing-function),
+              color var(--default-transition-duration) var(--default-transition-timing-function);
+}
+/* "You are here" reads through a contrast step, not an inversion — the strip
+   is wayfinding, and must never compete with the primary action above it. */
+.cj-step.active .cj-num { background: var(--color-background-primary-soft-active); color: var(--color-text); }
+.cj-step.active .cj-steplbl { color: var(--color-text); }
 
 .cj-warn {
-  background: #fffbe6; border: 1px solid #ffe58f; border-radius: 8px;
-  padding: 0.75rem 1rem; color: #7d6608; font-size: 0.88rem; margin: 0.8rem 0;
+  background: var(--color-background-caution-surface);
+  border: 1px solid var(--color-border-caution-surface); border-radius: var(--radius-lg);
+  padding: 12px 16px; color: var(--color-text-caution-surface);
+  font-size: var(--text-sm); line-height: 20px; margin: 12px 0;
 }
 
 /* ── Batch processing card ─────────────────────────────────────────────────── */
 .cj-proc {
-  position: relative; border: 1px solid var(--line); border-radius: 0; background: #fff;
+  position: relative; border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl); background: var(--color-surface);
   min-height: 380px; display: flex; flex-direction: column; justify-content: center;
-  gap: 16px; padding: 1.5rem 1.5rem 3.2rem;
+  gap: 16px; padding: 24px 24px 52px;
 }
 .cj-proc-cancel {
   position: absolute; left: 0; right: 0; bottom: 20px; text-align: center;
@@ -152,29 +839,32 @@ body {
 .cj-proc-head-track { width: 100%; height: 2px; background: var(--chip); position: relative; overflow: hidden; margin-top: 10px; }
 .cj-proc-head-fill { position: absolute; top: 0; left: 0; height: 100%; background: var(--ink); transition: width 0.4s ease; }
 .cj-proc-list { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; max-height: 300px; padding-right: 4px; }
-.cj-proc-row { display: flex; align-items: center; gap: 16px; border: 1px solid var(--line); border-radius: 0; padding: 14px 16px; flex-shrink: 0; }
+.cj-proc-row { display: flex; align-items: center; gap: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 12px 16px; flex-shrink: 0; }
 .cj-proc-row.done { opacity: 0.55; }
 .cj-proc-row.waiting { opacity: 0.45; }
-.cj-proc-row.error { opacity: 0.75; border-color: #d4a3a3; }
-.cj-proc-thumb { width: 48px; height: 48px; flex-shrink: 0; border-radius: 0; object-fit: cover; filter: grayscale(1); opacity: 0.6; }
+.cj-proc-row.error { opacity: 0.85; border-color: var(--color-border-danger-surface); background: var(--color-background-danger-surface); }
+.cj-proc-thumb { width: 48px; height: 48px; flex-shrink: 0; border-radius: var(--radius-sm); object-fit: cover; }
 .cj-proc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .cj-proc-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .cj-proc-name { font-size: 14px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cj-proc-status { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
-.cj-proc-row.error .cj-proc-status { color: #a04040; }
+.cj-proc-row.error .cj-proc-status { color: var(--color-text-danger); }
 .cj-proc-row.active .cj-proc-status { animation: cjpulse 1.4s ease-in-out infinite; }
 @keyframes cjpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .cj-proc-track { width: 100%; height: 2px; background: var(--chip); position: relative; overflow: hidden; }
 .cj-proc-fill { position: absolute; top: 0; left: 0; height: 100%; background: var(--ink); width: 0; }
-.cj-proc-row.active .cj-proc-fill { animation: cjfill 8s cubic-bezier(0.2, 0.7, 0.2, 1) forwards; }
+/* Paced to real gpt-image-2 latency (15-50s) so the bar doesn't stall at 92%
+   twelve seconds in and read as frozen. */
+.cj-proc-row.active .cj-proc-fill { animation: cjfill 45s cubic-bezier(0.3, 0.6, 0.4, 0.9) forwards; }
 .cj-proc-row.done .cj-proc-fill { width: 100%; }
 .cj-proc-row.waiting .cj-proc-fill { width: 6%; }
 @keyframes cjfill { 0% { width: 0; } 100% { width: 92%; } }
 
 /* ── Result screen ─────────────────────────────────────────────────────────── */
-.cj-result { display: flex; height: 100vh; overflow: hidden; }
+.cj-result { display: flex; height: calc(100vh - var(--cj-pagebar-h)); overflow: hidden; }
 .cj-canvas-col { flex: 1 1 auto; min-width: 0; background: #fff; display: flex; flex-direction: column; }
-.cj-stage { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 48px; position: relative; container-type: size; }
+/* content padding per platform spec: 24px sides */
+.cj-stage { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 24px; position: relative; container-type: size; }
 
 /* compare slider — the box is sized to the output ratio and fitted inside the
    stage: width = min(stage width, stage height × ratio), height from
@@ -201,7 +891,10 @@ body {
   content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: 34px; height: 34px; background: #fff; border-radius: 50%;
   border: 2px solid var(--line); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  /* discoverability: the drag handle appears when the cursor is over the stage */
+  opacity: 0; transition: opacity var(--default-transition-duration) var(--default-transition-timing-function);
 }
+.cj-split:hover .cj-slider::after { opacity: 1; }
 .cj-tag {
   position: absolute; bottom: 16px; z-index: 6; padding: 6px 14px;
   font-size: 12px; font-weight: 500; line-height: 1; letter-spacing: 0.02em;
@@ -216,6 +909,10 @@ body {
 .cj-stage-loading { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.35); }
 
 /* ── dimension annotation overlay ── */
+/* Clips overlays to the after side of the compare divider (left inset follows
+   the divider). pointer-events: none so divider scrubbing still works; the
+   overlay's interactive children opt back in individually. */
+.cj-overlay-clip { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
 .cj-dim-layer { position: absolute; inset: 0; z-index: 7; }
 .cj-dim-svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .cj-dim-handle {
@@ -242,19 +939,22 @@ body {
 .cj-dim-panel {
   position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 5;
   display: flex; align-items: center; gap: 12px;
-  padding: 12px 24px;
-  background: #fff; border: 1px solid #cfc4c5;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.05);
+  padding: 10px 16px;
+  background: var(--color-surface-elevated); border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow);
 }
 .cj-dim-instr {
-  font-family: var(--serif); font-size: 16px; letter-spacing: -0.8px; color: #000;
+  font-family: var(--font-sans); font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium); color: var(--color-text);
   white-space: nowrap;
 }
 .cj-dim-revert {
-  border: 1px solid rgba(126, 117, 118, 0.3); background: none; cursor: pointer;
-  padding: 5px 9px; font-family: var(--sans); font-weight: 600; font-size: 14px;
-  line-height: 20px; color: rgba(126, 117, 118, 0.6); white-space: nowrap;
+  border: 1px solid var(--color-border-primary-outline); background: none; cursor: pointer;
+  padding: 4px 10px; border-radius: var(--radius-md); font-family: var(--font-sans);
+  font-weight: var(--font-weight-normal); font-size: var(--text-xs);
+  line-height: 16px; color: var(--color-text-secondary); white-space: nowrap;
 }
+.cj-dim-revert:hover { background: var(--color-background-primary-outline-hover); color: var(--color-text); }
 .cj-dim-x {
   border: none; background: none; cursor: pointer; color: #000;
   display: flex; padding: 0; line-height: 0;
@@ -290,7 +990,7 @@ body {
 
 /* filmstrip */
 .cj-film {
-  border-top: 1px solid var(--line); background: var(--bg); padding: 16px 24px;
+  border-top: 1px solid var(--color-border-primary-surface); background: var(--bg); padding: 16px 24px;
   display: flex; flex-wrap: nowrap; gap: 8px; align-items: center;
   overflow-x: auto; min-width: 0; max-width: 100%; flex: 0 0 auto;
 }
@@ -299,13 +999,16 @@ body {
 .cj-film::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 .cj-tw { position: relative; flex: 0 0 auto; }
 .cj-thumb {
-  display: block; width: 72px; height: 72px; padding: 0; border-radius: 0;
-  border: 1px solid var(--line); background-size: cover; background-position: center;
+  display: block; width: 72px; height: 72px; padding: 0; border-radius: var(--radius-md);
+  border: 1px solid var(--color-border); background-size: cover; background-position: center;
   background-repeat: no-repeat; background-color: transparent; cursor: pointer;
-  filter: grayscale(1); opacity: 0.6; transition: opacity 0.15s, filter 0.15s, border-color 0.15s;
+  opacity: 0.55; transition: opacity 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
-.cj-tw:hover .cj-thumb { filter: grayscale(0); opacity: 0.82; border-color: #7e7576; }
-.cj-thumb.active { border: 1px solid #7e7576; filter: none; opacity: 1; }
+.cj-tw:hover .cj-thumb { opacity: 0.85; border-color: var(--color-border-strong); }
+.cj-thumb.active {
+  border-color: var(--color-gray-900);
+  box-shadow: 0 0 0 1px var(--color-gray-900); opacity: 1;
+}
 .cj-delbtn {
   position: absolute; top: 3px; right: 3px; z-index: 6; opacity: 0; pointer-events: none;
   width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line);
@@ -317,7 +1020,8 @@ body {
 .cj-delbtn:hover { background: var(--ink); color: #fff; }
 .cj-pend {
   position: relative; width: 72px; height: 72px; flex: 0 0 auto;
-  border: 1px solid var(--line); border-radius: 0; background-color: var(--line-soft);
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background-color: var(--color-background-primary-soft); overflow: hidden;
   background-size: cover; background-position: center;
 }
 .cj-pend.dim { opacity: 0.5; }
@@ -327,103 +1031,180 @@ body {
   margin: -10px 0 0 -10px; border: 2px solid var(--line); border-top-color: var(--ink);
   border-radius: 50%; animation: cjspin 0.8s linear infinite;
 }
-.cj-addtile {
-  width: 72px; height: 72px; flex: 0 0 auto; border: 1.5px dashed var(--line);
-  border-radius: 0; background: #fff; display: flex; align-items: center;
-  justify-content: center; cursor: pointer; transition: border-color 0.15s;
-  font-family: var(--sans); font-size: 32px; font-weight: 300; color: var(--ink-soft);
-  line-height: 1; padding: 0;
+/* Failed upload tile: photo stays in place, click retries it. */
+.cj-fail {
+  position: relative; width: 72px; height: 72px; flex: 0 0 auto;
+  border: 1px solid var(--color-border-danger-surface); border-radius: var(--radius-md);
+  background-color: var(--color-background-danger-surface); overflow: hidden;
+  background-size: cover; background-position: center;
+  cursor: pointer; padding: 0;
+  display: flex; align-items: center; justify-content: center;
 }
-.cj-addtile:hover { border-color: var(--ink); }
+.cj-fail::before { content: ""; position: absolute; inset: 0; background: rgba(255, 255, 255, 0.6); }
+.cj-fail .ms {
+  position: relative; z-index: 1; font-size: 22px; color: var(--color-text-danger);
+  transition: transform var(--default-transition-duration) var(--default-transition-timing-function);
+}
+.cj-fail:hover .ms { transform: rotate(90deg); }
+.cj-fail.busy::after {
+  content: ""; position: absolute; top: 50%; left: 50%; width: 18px; height: 18px;
+  margin: -10px 0 0 -10px; border: 2px solid var(--color-border);
+  border-top-color: var(--color-text); border-radius: 50%;
+  animation: cjspin 0.8s linear infinite;
+}
+
+.cj-addtile {
+  width: 72px; height: 72px; flex: 0 0 auto; border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md); background: var(--color-surface); display: flex;
+  align-items: center; justify-content: center; cursor: pointer; transition: border-color 0.15s;
+  font-family: var(--font-sans); font-size: 28px; font-weight: 300;
+  color: var(--color-text-secondary); line-height: 1; padding: 0;
+}
+.cj-addtile:hover { border-color: var(--input-outline-border-color-hover); }
 
 /* right panel (Figma 182:544 / 182:605) */
 .cj-panel {
-  flex: 0 0 384px; width: 384px; background: #fff; border-left: 1px solid var(--line);
+  flex: 0 0 384px; width: 384px; background: #fff;
+  /* Structural dividers all sit at alpha-05 — same as the page-title bar. */
+  border-left: 1px solid var(--color-border-primary-surface);
   display: flex; flex-direction: column; overflow: hidden;
 }
-.cj-panel.left { border-left: none; border-right: 1px solid var(--line); }
-.cj-color-row { display: flex; gap: 8px; }
-.cj-color-card {
-  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 10px; padding: 18px 1px; cursor: pointer;
-  background: var(--bg); color: var(--ink-soft); border: 1px solid var(--line);
-}
-.cj-color-card small {
-  font-family: var(--sans); font-size: 10px; font-weight: 600;
-  letter-spacing: 0.08em; text-transform: uppercase;
-}
-.cj-color-card:hover { border-color: #7e7576; }
-.cj-color-card.active { border: 1px solid #191c1d; color: var(--ink); }
+.cj-panel.left { border-left: none; border-right: 1px solid var(--color-border-primary-surface); }
+/* Color swatch inside the shared OptionCard (see components/OptionCard.tsx). */
 .cj-color-dot {
-  width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line);
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 1px solid var(--color-border);
   display: block;
 }
 .cj-apply-wide {
-  align-self: stretch; padding: 14px; background: #191c1d; border: none; border-radius: 0;
-  font-family: var(--sans); font-size: 13px; font-weight: 600; letter-spacing: 1px;
-  text-transform: uppercase; color: #fff; cursor: pointer;
+  align-self: stretch; height: 40px; background: var(--color-background-primary-solid);
+  border: none; border-radius: var(--radius-lg);
+  font-family: var(--font-sans); font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium); color: var(--color-white); cursor: pointer;
 }
-.cj-apply-wide:hover { background: #000; }
-.cj-panel-head { padding: 48px; border-bottom: 1px solid var(--line); }
-.cj-panel-head h3 { font-family: var(--serif); font-size: 48px; line-height: 56px; letter-spacing: -0.96px; font-weight: 400; color: #000; margin: 0; }
-.cj-panel-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 48px; display: flex; flex-direction: column; gap: 48px; }
-.cj-grp { display: flex; flex-direction: column; gap: 16px; }
-.cj-sec { font-family: var(--serif); font-size: 24px; line-height: 32px; font-weight: 400; color: #000; margin: 0; }
+.cj-apply-wide:hover { background: var(--color-background-primary-solid-hover); }
+.cj-panel-head { padding: 24px 24px 0; }
+.cj-panel-head h3 {
+  font-family: var(--font-sans); font-size: var(--text-lg); line-height: 1.4;
+  font-weight: var(--font-weight-semibold); color: var(--color-text); margin: 0;
+}
+/* Split-pane structure (platform spec): section header rows are 52px tall,
+   section content sits in 0 24px 16px, hairline separators between sections. */
+.cj-panel-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 24px 16px; display: flex; flex-direction: column; }
+/* One field-cluster. Vertical padding + gap are the panel's spacing rhythm:
+   16px between fields (gap) and 16px around the group (padding). */
+.cj-grp { display: flex; flex-direction: column; gap: 16px; padding: 16px 0; }
+/* Separators span the full panel width: pull the bordered group out to the
+   panel edges and restore its inner padding. */
+.cj-grp + .cj-grp {
+  border-top: 1px solid var(--color-border-primary-surface);
+  margin-left: -24px; margin-right: -24px;
+  padding-left: 24px; padding-right: 24px;
+}
+.cj-sec {
+  min-height: 52px; display: flex; align-items: center;
+  font-family: var(--font-sans); font-size: var(--text-sm); line-height: 20px;
+  font-weight: var(--font-weight-semibold); color: var(--color-text); margin: 0;
+}
 .cj-ratio-row { display: flex; gap: 8px; }
+/* The one option card (ratio pickers, color pickers — via OptionCard). */
 .cj-ratio-card {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 8px; padding: 25px 1px; border-radius: 0; cursor: pointer;
-  font-family: var(--serif); font-size: 24px; line-height: 32px; font-weight: 400;
-  background: var(--bg); color: var(--ink-soft); border: 1px solid var(--line);
-  transition: border-color 0.15s, color 0.15s;
+  gap: 6px; padding: 16px 1px; border-radius: var(--radius-md); cursor: pointer;
+  font-family: var(--font-sans); font-size: var(--text-base); line-height: 24px;
+  font-weight: var(--font-weight-semibold);
+  background: var(--color-surface); color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
-.cj-ratio-card small { font-family: var(--sans); font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 1.2px; text-transform: uppercase; }
-.cj-ratio-card:hover { border-color: #7e7576; color: #000; }
-.cj-ratio-card.active { background: #000; color: #fff; border-color: #000; }
-.cj-ratio-card.active small { opacity: 0.8; }
+.cj-ratio-card small {
+  font-size: var(--text-2xs); line-height: 14px;
+  font-weight: var(--font-weight-medium); letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  white-space: nowrap; text-align: center;
+}
+/* OptionCard `stack`: one word per line (labels arrive pre-joined with \n). */
+.cj-ratio-card small.stack { white-space: pre-line; }
+.cj-ratio-card:hover { border-color: var(--color-border-primary-outline-hover); color: var(--color-text); }
+/* Selection reads through the outline, not a heavy fill — a secondary setting
+   shouldn't carry the darkest block on the page. */
+.cj-ratio-card.active {
+  background: var(--color-surface); color: var(--color-text);
+  border-color: var(--color-gray-900);
+  box-shadow: inset 0 0 0 1px var(--color-gray-900);
+}
+.cj-ratio-card.active small { color: var(--color-text-secondary); }
 
 .cj-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.cj-switch { position: relative; width: 48px; height: 24px; border-radius: 12px; background: var(--line-soft); border: none; cursor: pointer; padding: 0; transition: background 0.3s; flex: 0 0 48px; }
-.cj-switch::after {
-  content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
-  border-radius: 10px; background: #7e7576; transition: transform 0.3s, background 0.3s;
+/* Switch — dialog design spec: 32×19 track, 13px round white thumb. */
+.cj-switch {
+  position: relative; width: 32px; height: 19px; border-radius: var(--radius-full);
+  background: var(--switch-track-color); border: none; cursor: pointer; padding: 0;
+  transition: background var(--default-transition-duration) var(--default-transition-timing-function);
+  flex: 0 0 32px;
 }
-.cj-switch.on { background: #000; }
-.cj-switch.on::after { background: var(--line-soft); transform: translateX(24px); }
+.cj-switch:hover { background: var(--switch-track-color-hover); }
+.cj-switch::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 13px; height: 13px;
+  border-radius: var(--radius-full); background: var(--switch-thumb-color);
+  transition: transform var(--default-transition-duration) var(--default-transition-timing-function);
+}
+.cj-switch.on, .cj-switch.on:hover { background: var(--switch-track-color-checked); }
+.cj-switch.on::after { transform: translateX(13px); }
+
+/* small helper line under a control (e.g. the Cover toggle) */
+/* Caption under a control. Always inside a .cj-field, so the field's 8px gap
+   positions it — no margin games. */
+.cj-hint {
+  margin: 0; font-size: var(--text-xs); line-height: var(--text-xs--line-height);
+  color: var(--color-text-tertiary);
+}
 
 .cj-desc-row { display: flex; gap: 8px; align-items: stretch; overflow: hidden; max-height: 0; opacity: 0; transition: max-height 0.5s ease-in-out, opacity 0.5s ease-in-out; }
 .cj-desc-row.open { max-height: 120px; opacity: 1; }
 .cj-desc-input {
-  flex: 1 1 auto; min-width: 0; background: var(--bg); border: 1px solid var(--line);
-  border-radius: 0; font-family: var(--sans); font-size: 18px; color: #191c1d;
+  flex: 1 1 auto; min-width: 0; background: var(--color-surface);
+  border: 1px solid var(--color-border-primary-outline); border-radius: var(--radius-md);
+  font-family: var(--font-sans); font-size: var(--text-sm); color: var(--color-text);
   padding: 8px 12px; outline: none;
+  transition: border-color var(--default-transition-duration) var(--default-transition-timing-function);
 }
-.cj-desc-input::placeholder { color: rgba(93, 94, 102, 0.5); }
+.cj-desc-input:hover { border-color: var(--input-outline-border-color-hover); }
+.cj-desc-input:focus { border-color: var(--color-ring); }
+.cj-desc-input::placeholder { color: var(--color-text-tertiary); }
 .cj-apply {
-  flex: 0 0 auto; padding: 0 18px; border: none; background: #191c1d; border-radius: 0;
-  font-family: var(--sans); font-size: 13px; font-weight: 600; letter-spacing: 1px;
-  text-transform: uppercase; color: #fff; cursor: pointer;
+  flex: 0 0 auto; padding: 0 14px; border: none;
+  background: var(--color-background-primary-solid); border-radius: var(--radius-md);
+  font-family: var(--font-sans); font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium); color: var(--color-white); cursor: pointer;
 }
-.cj-apply:hover { opacity: 0.9; }
-.cj-foot { padding: 48px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 16px; }
+.cj-apply:hover { background: var(--color-background-primary-solid-hover); }
+.cj-foot { padding: 16px 24px 24px; border-top: 1px solid var(--color-border-subtle); display: flex; flex-direction: column; gap: 8px; }
 
-/* ── Modals (export selection / delete confirm) ────────────────────────────── */
+/* ── Modals — platform-console dialog design (Figma auto-recharge spec):
+      white card, 16px radius, no separators, 18px semibold title, 14px/24px
+      body, 32px pill buttons right-aligned. Grid dialogs keep a wider card. */
 .cj-modal-scrim {
   position: fixed; inset: 0; z-index: 100; display: flex; align-items: center;
-  justify-content: center; padding: 2rem; background: rgba(248, 249, 250, 0.6);
-  backdrop-filter: blur(4px);
+  justify-content: center; padding: 2rem;
+  background: var(--modal-backdrop-background);
 }
 .cj-modal {
-  background: #fff; width: 100%; max-width: 896px; max-height: 90vh; border-radius: 2px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15); display: flex; flex-direction: column;
-  border: 1px solid var(--line); overflow: hidden;
+  background: var(--color-surface-elevated); width: 100%; max-width: 896px;
+  max-height: 90vh; border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow); display: flex; flex-direction: column;
+  border: none; overflow: hidden;
+  font-family: var(--font-sans);
 }
-.cj-modal.small { max-width: 420px; }
-.cj-modal-head { padding: 24px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
-.cj-modal-head h2 { font-family: var(--serif); font-size: 32px; line-height: 40px; font-weight: 400; color: var(--ink); margin: 0; }
-.cj-modal-x { background: none; border: none; color: var(--ink-soft); cursor: pointer; padding: 4px; }
-.cj-modal-x:hover { color: var(--ink); }
-.cj-modal-body { flex: 1 1 auto; overflow-y: auto; padding: 24px; }
+.cj-modal.small { max-width: 450px; }
+.cj-modal-head { padding: 20px 20px 0; display: flex; justify-content: space-between; align-items: center; }
+.cj-modal-head h2 {
+  font-family: var(--font-sans); font-size: 18px; line-height: 1.4;
+  font-weight: var(--font-weight-semibold); color: var(--color-text); margin: 0;
+}
+/* The dialog design has no corner close affordance — Cancel is the way out. */
+.cj-modal-x { display: none; }
+.cj-modal-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 20px; }
 .cj-modal-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 @media (max-width: 760px) { .cj-modal-grid { grid-template-columns: repeat(2, 1fr); } }
 .cj-ex-item { position: relative; aspect-ratio: 1; background: var(--chip); border-radius: 2px; overflow: hidden; cursor: pointer; border: 1px solid var(--line); padding: 0; transition: border-color 0.15s; }
@@ -438,31 +1219,151 @@ body {
   background: rgba(248, 249, 250, 0.7); color: #7e7576;
 }
 .cj-ex-item.sel .cj-ex-badge { background: var(--ink); color: #fff; }
-.cj-modal-foot { padding: 24px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 12px; background: var(--bg); }
+.cj-modal-foot { padding: 0 20px 20px; display: flex; justify-content: flex-end; gap: 8px; }
 .cj-modal-cancel {
-  padding: 12px 32px; background: none; border: none; font-family: var(--sans);
-  font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
-  color: var(--ink-soft); cursor: pointer;
+  height: 32px; padding: 0 14px; border: none; border-radius: var(--radius-lg);
+  background: var(--color-background-primary-soft-alpha);
+  font-family: var(--font-sans); font-size: var(--text-sm);
+  font-weight: var(--font-weight-normal); color: var(--color-gray-900);
+  cursor: pointer;
+  transition: background var(--default-transition-duration) var(--default-transition-timing-function);
 }
-.cj-modal-cancel:hover { color: var(--ink); }
+.cj-modal-cancel:hover { background: var(--color-background-primary-soft-alpha-hover); }
 .cj-modal-go {
-  padding: 14px 40px; background: #000; color: #fff; border: none; border-radius: 0;
-  font-family: var(--sans); font-size: 14px; font-weight: 600; letter-spacing: 0.05em;
-  text-transform: uppercase; cursor: pointer;
+  height: 32px; padding: 0 14px; border: none; border-radius: var(--radius-lg);
+  background: var(--color-background-primary-solid); color: var(--color-white);
+  font-family: var(--font-sans); font-size: var(--text-sm);
+  font-weight: var(--font-weight-normal); cursor: pointer;
+  transition: background var(--default-transition-duration) var(--default-transition-timing-function);
 }
-.cj-modal-go:hover { opacity: 0.9; }
-.cj-modal-go:disabled { background: #c9cbcd; cursor: not-allowed; opacity: 1; }
-.cj-modal-text { font-size: 15px; color: var(--ink); padding: 24px; }
+.cj-modal-go:hover { background: var(--color-background-primary-solid-hover); }
+.cj-modal-go:disabled { background: var(--color-gray-300); cursor: not-allowed; }
+.cj-modal-text {
+  font-size: var(--text-sm); line-height: 24px;
+  color: var(--color-text-secondary); padding: 16px 20px 24px;
+}
+
+/* ── Library — auto-saved exports on a persistent wireframe grid ───────────── */
+.cj-lib { position: relative; min-height: calc(100vh - 57px); }
+/* -1px margins crop the outermost hairlines so only interior lines show. */
+.cj-lib-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  margin-right: -1px;
+}
+@media (max-width: 1400px) { .cj-lib-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 1000px) { .cj-lib-grid { grid-template-columns: repeat(2, 1fr); } }
+.cj-lib-cell {
+  position: relative; aspect-ratio: 1;
+  border-right: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.cj-lib-img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; padding: 8%; box-sizing: border-box;
+}
+.cj-lib-actions { position: absolute; inset: 0; opacity: 0; transition: opacity var(--default-transition-duration) var(--default-transition-timing-function); }
+.cj-lib-cell:hover .cj-lib-actions { opacity: 1; }
+.cj-lib-iconbtn {
+  position: absolute; width: 32px; height: 32px; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.75); color: var(--color-gray-700);
+  transition: background var(--default-transition-duration) var(--default-transition-timing-function),
+              color var(--default-transition-duration) var(--default-transition-timing-function);
+}
+.cj-lib-iconbtn:hover { background: var(--color-gray-0); color: var(--color-gray-1000); }
+.cj-lib-iconbtn.tl { top: 12px; left: 12px; }
+.cj-lib-iconbtn.bl { bottom: 12px; left: 12px; }
+.cj-lib-iconbtn.br { bottom: 12px; right: 12px; }
+.cj-lib-empty {
+  position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+  font-size: var(--text-sm); color: var(--color-text-tertiary);
+  pointer-events: none;
+}
+/* Day section header between grid groups. */
+.cj-lib-day {
+  padding: 10px 24px; font-size: var(--text-xs);
+  color: var(--color-text-secondary); font-weight: var(--font-weight-medium);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+/* Transient "Saved to Library" note under the Export button. */
+.cj-saved {
+  margin: 0; text-align: center; font-size: var(--text-xs);
+  color: var(--color-text-success);
+  animation: cj-detail-in 0.2s var(--default-transition-timing-function);
+}
+
+/* full-screen detail — platform-console spec: 40px/40px/60px page padding,
+   80px gap; image pane flexes and hugs the text column (object-position
+   right); text column ≤600px, vertically centred. */
+.cj-lib-detail {
+  position: fixed; inset: 0; z-index: 120; background: var(--color-surface);
+  display: flex; align-items: stretch; gap: 80px;
+  padding: 40px 40px 60px;
+  animation: cj-detail-in 0.25s var(--default-transition-timing-function);
+}
+@keyframes cj-detail-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+.cj-lib-detail-stage { flex: 1 1 auto; min-width: 0; }
+/* Paging: the incoming image stays hidden until loaded, then fade-slides in
+   from the arrow direction (--page-from, ±12px; 0 on first open = plain fade).
+   Meta text swaps instantly — only the image moves. */
+.cj-lib-detail-stage img {
+  width: 100%; height: 100%; object-fit: contain;
+  object-position: right center;
+  opacity: 0;
+}
+.cj-lib-detail-stage img.in {
+  opacity: 1;
+  animation: cj-page-in 160ms cubic-bezier(0, 0, 0.2, 1);
+}
+@keyframes cj-page-in {
+  from { opacity: 0; transform: translateX(var(--page-from, 0px)); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cj-lib-detail { animation: none; }
+  .cj-lib-detail-stage img.in { animation: none; }
+}
+.cj-lib-detail-side {
+  flex: 1 1 600px; max-width: 600px; margin: auto 0; padding-right: 40px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.cj-lib-detail-meta {
+  display: flex; flex-wrap: wrap; column-gap: 16px; row-gap: 12px;
+  font-size: var(--text-sm); color: var(--color-text-tertiary);
+}
+.cj-lib-download {
+  align-self: flex-start; display: flex; align-items: center; gap: 8px;
+  height: 40px; padding: 0 18px; border: none; border-radius: var(--radius-full);
+  background: var(--color-background-primary-solid); color: var(--color-white);
+  font-family: var(--font-sans); font-size: var(--text-sm);
+  font-weight: var(--font-weight-semibold); cursor: pointer;
+  transition: background var(--default-transition-duration) var(--default-transition-timing-function);
+}
+.cj-lib-download:hover { background: var(--color-background-primary-solid-hover); }
+.cj-lib-close {
+  position: absolute; top: 16px; right: 16px; width: 40px; height: 40px;
+  border: none; background: none; cursor: pointer; border-radius: var(--radius-full);
+  font-size: 18px; color: var(--color-text-secondary);
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--default-transition-duration) var(--default-transition-timing-function);
+}
+.cj-lib-close:hover { background: var(--color-background-primary-ghost-hover); color: var(--color-text); }
 
 /* ── Social wizard ─────────────────────────────────────────────────────────── */
 .cj-soc { height: 100vh; overflow-y: auto; scroll-snap-type: y mandatory; position: relative; }
 .cj-soc.nosnap { scroll-snap-type: none; }
 .cj-soc-head {
-  position: fixed; top: 0; left: 256px; right: 0; z-index: 40; display: flex;
-  align-items: center; gap: 18px; padding: 26px 48px 18px; pointer-events: none;
-  background: linear-gradient(var(--bg) 62%, rgba(248, 249, 250, 0));
+  position: fixed; top: var(--cj-pagebar-h); left: 260px; right: 0; z-index: 40; display: flex;
+  align-items: center; gap: 18px; padding: 16px 24px; pointer-events: none;
+  background: linear-gradient(var(--bg) 62%, rgba(255, 255, 255, 0));
 }
-.cj-soc-title { font-family: var(--serif); font-style: italic; font-size: 28px; color: #111; line-height: 1.2; }
+/* Page identity now lives in the global title bar — hide the wizard's own. */
+.cj-soc-title { display: none; }
 .cj-soc-step { font-size: 11px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin-left: auto; }
 .cj-soc-back {
   pointer-events: auto; width: 44px; height: 44px; border-radius: 50%; background: transparent;
@@ -510,7 +1411,7 @@ body {
 .cj-sel-note::after { content: "  ·  SELECTED"; color: var(--ink); }
 
 .cj-soc-actions {
-  position: fixed; bottom: 0; left: 256px; right: 0; z-index: 40; display: flex;
+  position: fixed; bottom: 0; left: 260px; right: 0; z-index: 40; display: flex;
   flex-direction: column; align-items: center; padding: 18px 48px 26px;
   background: linear-gradient(rgba(248, 249, 250, 0), var(--bg) 55%);
 }
@@ -574,15 +1475,62 @@ body {
   display: block; width: auto; height: auto; max-width: 100%;
   max-height: calc(100vh - 330px);
 }
+/* Fixed 96×96 footprint regardless of output ratio — the strip must not
+   reflow when the user switches 1:1 / 4:5 / 9:16; tall renders letterbox
+   inside via object-fit: contain. */
 .cj-tpl-thumb {
-  height: 96px; flex: 0 0 auto; padding: 0; background: #fff; cursor: pointer;
-  border: 1px solid var(--line); border-radius: 0; overflow: hidden;
-  opacity: 0.6; filter: grayscale(0.4);
+  width: 96px; height: 96px; flex: 0 0 auto; padding: 0;
+  background: var(--color-surface-tertiary); cursor: pointer;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  overflow: hidden;
+  /* full colour at rest — the old grayscale wash made template decorations
+     (frames/scribbles over the 40% photo shade) read as "covered", and sat
+     too close to the .dim incompatible state. Selection is carried by the
+     border ring instead. */
+  opacity: 0.9;
   transition: opacity 0.15s, filter 0.15s, border-color 0.15s;
 }
-.cj-tpl-thumb:hover { opacity: 0.85; filter: none; border-color: #7e7576; }
-.cj-tpl-thumb.active { opacity: 1; filter: none; border: 1px solid #7e7576; }
-.cj-tpl-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.cj-tpl-thumb:hover { opacity: 1; border-color: var(--input-outline-border-color-hover); }
+.cj-tpl-thumb.active {
+  opacity: 1; border-color: var(--color-text);
+  box-shadow: 0 0 0 1px var(--color-text);
+}
+.cj-tpl-thumb img { display: block; width: 100%; height: 100%; object-fit: contain; }
+/* Templates in CONFLICT with the current content (it would be dropped):
+   dimmed in place (fixed order, so the strip never reflows while typing)
+   and inert; the title attr says why. */
+.cj-tpl-thumb.dim { opacity: 0.18; filter: grayscale(1); cursor: default; }
+.cj-tpl-thumb.dim:hover { opacity: 0.28; border-color: var(--color-border); }
+.cj-tpl-thumb.dim.active { opacity: 0.45; border-color: var(--color-text); }
+/* INCOMPLETE (just missing a photo): stays active, small camera badge only. */
+.cj-tpl-thumb { position: relative; }
+.cj-needs-photo {
+  position: absolute; top: 4px; right: 4px;
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  border: 1px solid var(--color-border);
+  color: var(--muted); pointer-events: none;
+}
+/* title-truncation hint under the Title input */
+.cj-trunc-hint { color: var(--color-text-warning, #9a6700); }
+/* category groups inside the filmstrip */
+.cj-film-group {
+  display: flex; align-items: center; gap: 8px; flex: 0 0 auto;
+  padding-right: 16px; margin-right: 4px;
+  border-right: 1px solid var(--color-border-primary-surface);
+}
+.cj-film-group:last-child { border-right: none; padding-right: 0; margin-right: 0; }
+.cj-film-cat {
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); flex: 0 0 auto; line-height: 1; user-select: none;
+}
+/* banner shown when the selected template no longer fits the content */
+.cj-film-warn {
+  margin: 0 24px; padding: 8px 12px; font-size: 13px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
 .cj-soc-tplname { font-size: 15px; color: var(--ink); margin: 0; text-transform: capitalize; }
 .cj-soc-tplname span { color: var(--muted); }
 .cj-reroll {
@@ -602,6 +1550,16 @@ body {
   #cj-arc { display: none; }
   .cj-panel { flex-basis: 100%; width: 100%; }
   .cj-result { flex-direction: column; height: auto; }
+  /* Stacked layout puts the controls (and Download) above the preview, so the
+     button would otherwise sit before what it downloads — pin it to the
+     bottom of the viewport instead. */
+  .cj-soc-foot {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    background: var(--bg);
+    border-top: 1px solid var(--color-border-primary-surface);
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  }
+  .cj-result:has(.cj-soc-foot) { padding-bottom: 72px; }
   .cj-edit-row { flex-direction: column; padding: 110px 24px 40px; }
   /* Stacked layout gives the stage auto height, so container-type:size would
      collapse it — fall back to letting the image size the box (no clipping

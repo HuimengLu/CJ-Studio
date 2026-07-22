@@ -5,3 +5,4 @@ __pycache__/
 
 # Real-ESRGAN weights — local-only, not part of the deployed build
 models/
+storage/
