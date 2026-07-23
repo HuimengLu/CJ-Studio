@@ -56,6 +56,15 @@ _photos: dict = {}           # id → record
 _social_imgs: dict = {}      # id → {bytes, touched}
 _testing2: dict = {}         # id → {name, plate, original, compose_cache, touched}
 
+# Cap concurrent heavy Pillow renders. Sync endpoints run in a ~40-thread
+# pool, so e.g. the Social filmstrip's 17 template thumbnails all render at
+# once — each briefly holds a decoded photo plus canvases, and together the
+# spike OOM-restarts a small instance (Render free = 512MB), wiping every
+# in-memory session. Three at a time bounds the spike; the rest of the
+# requests just wait a beat.
+_RENDER_SEM = threading.BoundedSemaphore(
+    int(os.environ.get("CJ_RENDER_CONCURRENCY", "3")))
+
 
 def _evict_stale() -> None:
     now = time.time()
@@ -221,6 +230,12 @@ async def create_testing2(file: UploadFile = File(...)):
     raw = await file.read()
     try:
         img = ImageOps.exif_transpose(Image.open(io.BytesIO(raw)))
+        # Bound the retained original: the gpt-image input downscales to
+        # 2048px anyway and the "before" preview tops out at 1400px, but a
+        # 12MP original held as RGB is ~36MB of resident RAM per photo —
+        # a handful of uploads alone can OOM a 512MB instance.
+        if max(img.size) > 2048:
+            img.thumbnail((2048, 2048), Image.LANCZOS)
     except Exception:
         raise HTTPException(400, f"{file.filename}: could not open image")
 
@@ -257,21 +272,22 @@ def _testing2_png(rec: dict, ratio: str, kind: str, width: int | None) -> bytes:
     if key in cache:
         return cache[key]
 
-    if kind == "before":
-        img = pipeline.fit_to_ratio(rec["original"], ratio)
-    elif kind == "cover":
-        if rec.get("cover") is None:
-            raise HTTPException(404, "cover not generated")
-        img = pipeline.cover_to_ratio(rec["cover"], ratio)
-    else:
-        img = pipeline.compose_testing2(rec["plate"], ratio)
-    if width and width < img.width:
-        img = img.resize((width, round(img.height * width / img.width)),
-                         Image.LANCZOS)
-    # JPEG for on-screen previews: a 1400px stage PNG is ~2MB vs ~250KB as
-    # JPEG-85 — on mobile connections that difference IS the loading time.
-    # Downloads keep full-quality PNG via the separate /export path.
-    jpg = pipeline.to_jpeg_bytes(img, quality=85)
+    with _RENDER_SEM:
+        if kind == "before":
+            img = pipeline.fit_to_ratio(rec["original"], ratio)
+        elif kind == "cover":
+            if rec.get("cover") is None:
+                raise HTTPException(404, "cover not generated")
+            img = pipeline.cover_to_ratio(rec["cover"], ratio)
+        else:
+            img = pipeline.compose_testing2(rec["plate"], ratio)
+        if width and width < img.width:
+            img = img.resize((width, round(img.height * width / img.width)),
+                             Image.LANCZOS)
+        # JPEG for on-screen previews: a 1400px stage PNG is ~2MB vs ~250KB as
+        # JPEG-85 — on mobile connections that difference IS the loading time.
+        # Downloads keep full-quality PNG via the separate /export path.
+        jpg = pipeline.to_jpeg_bytes(img, quality=85)
     if len(cache) > 16:
         cache.clear()
     cache[key] = jpg
@@ -501,12 +517,27 @@ def library_delete(lid: str):
 
 # ── Social ─────────────────────────────────────────────────────────────────────
 
+def _prep_social_upload(raw: bytes) -> bytes:
+    """Bound an upload to 2048px and re-encode as JPEG-90.
+
+    The stored bytes are re-decoded on EVERY template render, and the Social
+    filmstrip fires 17 renders at once — a raw 12MP phone photo decoding to
+    ~36MB RGB per render is what OOM-restarts a 512MB instance. 2048px
+    comfortably covers the 1080px top render size."""
+    img = ImageOps.exif_transpose(Image.open(io.BytesIO(raw)))
+    if max(img.size) > 2048:
+        img.thumbnail((2048, 2048), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
 @app.post("/api/social/upload")
 async def social_upload(file: UploadFile = File(...)):
     _evict_stale()
     raw = await file.read()
     try:
-        Image.open(io.BytesIO(raw)).verify()
+        raw = await run_in_threadpool(_prep_social_upload, raw)
     except Exception:
         raise HTTPException(400, "could not open image")
     img_id = uuid.uuid4().hex[:12]
@@ -566,8 +597,9 @@ def _social_render(style: str, theme: str, ratio: str, title: str,
     else:
         img_bytes = _testing_img()
     w = max(96, min(w, 2048))
-    return social_engine.render_testing(style, theme, ratio, img_bytes,
-                                        title, subtitle, w)
+    with _RENDER_SEM:
+        return social_engine.render_testing(style, theme, ratio, img_bytes,
+                                            title, subtitle, w)
 
 
 @app.get("/api/testing/render")
