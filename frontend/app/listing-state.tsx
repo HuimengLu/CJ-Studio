@@ -144,7 +144,6 @@ function useListingState() {
   const [exporting, setExporting] = useState(false);
   const [dimMode, setDimMode] = useState(false);
   const [coverBusy, setCoverBusy] = useState<Set<string>>(new Set());
-  const [pendingSelect, setPendingSelect] = useState<string | null>(null);
   const [failed, setFailed] = useState<FailedRow[]>([]);
   const [savedNote, setSavedNote] = useState(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -166,11 +165,9 @@ function useListingState() {
 
   const photo = photos[active];
 
-  // Live mirrors for async callbacks (cover completion, delayed deletes).
-  const activePhotoIdRef = useRef<string | null>(null);
+  // Live mirror for async callbacks (delayed deletes).
   const photosRef = useRef(photos);
   useEffect(() => {
-    activePhotoIdRef.current = photo?.id ?? null;
     photosRef.current = photos;
   });
 
@@ -231,7 +228,6 @@ function useListingState() {
     setExportOpen(false);
     setConfirmDelete(null);
     setCoverBusy(new Set());
-    setPendingSelect(null);
     setFailed([]);
     setNewCovers(new Set());
     if (undoTimer.current) clearTimeout(undoTimer.current);
@@ -250,19 +246,6 @@ function useListingState() {
     window.addEventListener("cj:reset-listing", resetToHome);
     return () => window.removeEventListener("cj:reset-listing", resetToHome);
   }, [resetToHome]);
-
-  // Select a freshly inserted entry (e.g. a new cover) once it exists.
-  useEffect(() => {
-    if (!pendingSelect) return;
-    const idx = photos.findIndex((p) => entryKey(p) === pendingSelect);
-    if (idx >= 0) {
-      setActive(idx);
-      setImgLoading(true);
-      setDimMode(false);
-      setAnimate(true);          // sweep reveal on the fresh cover, like any switch
-    }
-    setPendingSelect(null);
-  }, [pendingSelect, photos]);
 
   const mutatePhoto = useCallback((patch: Partial<Photo>) => {
     setImgLoading(true);
@@ -402,13 +385,9 @@ function useListingState() {
         };
         return [...ps.slice(0, base + 1), entry, ...ps.slice(base + 1)];
       });
-      // Only jump to the new cover if the user is still on this photo —
-      // otherwise badge it in the filmstrip instead of yanking their focus.
-      if (activePhotoIdRef.current === id) {
-        setPendingSelect(`${id}:cover`);
-      } else {
-        setNewCovers((s) => new Set(s).add(id));
-      }
+      // Never yank focus: the new cover lands in the filmstrip with an
+      // "unread" dot, cleared when the user clicks it.
+      setNewCovers((s) => new Set(s).add(id));
     } catch {
       setWarn("Cover generation failed: network error");
     } finally {
