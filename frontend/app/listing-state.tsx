@@ -192,15 +192,17 @@ function useListingState() {
 
   /* Warm the other ratios for the active photo in the background, so
      switching Output Ratio is a browser-cache hit instead of a fresh
-     server-side compose + full-size download. */
+     server-side compose + full-size download. Waits until the visible stage
+     image has finished (imgLoading false) — kicking these off earlier makes
+     them compete with it for bandwidth and slows the first paint. */
   useEffect(() => {
-    if (phase !== "result" || !photo) return;
+    if (phase !== "result" || !photo || imgLoading) return;
     for (const r of RATIOS) {
       if (r.id === photo.ratio) continue;
       prefetch(imgUrl({ ...photo, ratio: r.id }, "after", STAGE_W));
       prefetch(imgUrl({ ...photo, ratio: r.id }, "before", STAGE_W));
     }
-  }, [phase, photo, prefetch]);
+  }, [phase, photo, imgLoading, prefetch]);
 
   // A fresh cover was selected — its "new" badge has served its purpose.
   useEffect(() => {

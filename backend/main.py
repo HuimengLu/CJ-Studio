@@ -144,7 +144,8 @@ def photo_thumb(photo_id: str, s: int = 160):
     thumb = rec["result"].copy()
     thumb.thumbnail((s, s))
     return Response(pipeline.to_jpeg_bytes(thumb, quality=82),
-                    media_type="image/jpeg")
+                    media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.delete("/api/photos/{photo_id}")
@@ -279,8 +280,14 @@ def testing2_image(tid: str, ratio: str = "1:1", kind: str = "after",
                    w: int | None = None):
     rec = _get_testing2(tid)
     png = _testing2_png(rec, ratio, kind, w)
+    # A given (id, kind, ratio, w) never changes once it exists (the plate is
+    # fixed at upload; covers get their own kind and 404 until generated), so
+    # let the browser cache it — the frontend prefetches the other ratios and
+    # relies on these being cache hits for instant ratio switching. `private`
+    # keeps shared proxies out of it. no-store here made every ratio switch a
+    # full re-download and the prefetch pure wasted bandwidth.
     return Response(png, media_type="image/png",
-                    headers={"Cache-Control": "no-store"})
+                    headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.post("/api/testing2/{tid}/cover")
@@ -311,7 +318,8 @@ def testing2_thumb(tid: str, s: int = 160, kind: str = "after"):
         thumb = pipeline.compose_testing2(rec["plate"], "1:1")
     thumb.thumbnail((s, s))
     return Response(pipeline.to_jpeg_bytes(thumb, quality=82),
-                    media_type="image/jpeg")
+                    media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.delete("/api/testing2/{tid}")
