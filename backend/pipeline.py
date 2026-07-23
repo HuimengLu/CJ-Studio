@@ -39,7 +39,16 @@ _RATIO_AR = {"1:1": 1.0, "4:3": 4 / 3, "4:5": 4 / 5}
 
 @functools.lru_cache(maxsize=1)
 def _withoutbg_model():
-    from withoutbg import WithoutBG
+    try:
+        from withoutbg import WithoutBG
+    except ImportError as exc:
+        # This deployment ships without the legacy background-removal deps
+        # (withoutbg/onnxruntime) to stay light on RAM. The legacy /api/photos
+        # path is inert here; New Listing / Social use the OpenAI pipeline.
+        raise RuntimeError(
+            "Legacy background removal is not available in this deployment. "
+            "Use New Listing (OpenAI pipeline) instead."
+        ) from exc
 
     log.info("Loading withoutbg open-source model...")
     t0 = time.perf_counter()

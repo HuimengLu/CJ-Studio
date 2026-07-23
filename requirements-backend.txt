@@ -10,11 +10,16 @@ Pillow>=10.0.0
 numpy>=1.26.0
 opencv-python-headless>=4.9.0
 
-# Background removal — withoutbg. Pinned so the HF model repo it fetches stays
-# deterministic (1.0.6 uses withoutbg/withoutbg-openweights-onnx, which the
-# Dockerfile pre-bakes; a future version could switch repos and break offline).
-withoutbg==1.0.6
-onnxruntime>=1.16.0
+# NOTE: withoutbg + onnxruntime (the legacy /api/photos background-removal
+# pipeline) are intentionally NOT installed in this deployment. They pull a
+# multi-hundred-MB ONNX model that blows past small instances' RAM, and the
+# active app (New Listing / Social) uses the OpenAI pipeline instead. The
+# legacy code stays in pipeline.py but is inert here — _withoutbg_model()
+# raises a clear "not available in this deployment" error if invoked. To
+# re-enable legacy, add back:
+#     withoutbg==1.0.6
+#     onnxruntime>=1.16.0
+# and restore the model-baking RUN step in the Dockerfile.
 
 # OpenAI gpt-image pipeline (New Listing / Social). Kept in sync with
 # requirements.txt — the backend imports these at startup of openai_engine.py,

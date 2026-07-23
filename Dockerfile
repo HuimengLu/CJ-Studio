@@ -42,12 +42,11 @@ COPY --chown=user bg_artwork.png .
 
 USER user
 
-# Bake the background-removal weights into the image so startup needs no
-# network. withoutbg 1.0.6 loads repo withoutbg/withoutbg-openweights-onnx
-# lazily on first use, so pull the whole snapshot into HF_HOME now and verify
-# it landed (fail the build otherwise).
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('withoutbg/withoutbg-openweights-onnx')" \
-    && python -c "import glob,sys; f=glob.glob('/home/user/.cache/huggingface/**/*.onnx',recursive=True); print('baked onnx:',f); sys.exit(0 if f else 1)"
+# NOTE: the legacy withoutbg background-removal model is intentionally NOT
+# baked in — this deployment runs the OpenAI pipeline (New Listing / Social)
+# only, which keeps the image small and the RAM footprint low. To re-enable
+# legacy, add withoutbg + onnxruntime back to requirements-backend.txt and
+# restore the snapshot_download RUN step here.
 
 EXPOSE 7860
 CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-7860} --timeout-keep-alive 75"]
