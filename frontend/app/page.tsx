@@ -204,7 +204,10 @@ export default function ListingPage() {
               )
             }
           />
-          {imgLoading && <div className="cj-stage-loading"><div className="cj-spin" /></div>}
+          {/* No spinner here: the is-loading shimmer on the stage box IS the
+              loading state. Shimmer + spinner together read as two competing
+              signals (and the empty img area lets the shimmer show through
+              whenever pixels are actually missing). */}
         </div>
 
         {/* Always present — the "+" tile is the only way to add more photos. */}

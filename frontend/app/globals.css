@@ -846,8 +846,11 @@ body {
 .cj-proc-thumb { width: 48px; height: 48px; flex-shrink: 0; border-radius: var(--radius-sm); object-fit: cover; }
 .cj-proc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .cj-proc-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.cj-proc-name { font-size: 14px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cj-proc-status { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+/* The name yields (ellipsised) but keeps real space; the status never wraps
+   or shrinks — without min-width:0 the long "Optimizing…" status crushed the
+   filename to a sliver on narrow screens. */
+.cj-proc-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cj-proc-status { flex-shrink: 0; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
 .cj-proc-row.error .cj-proc-status { color: var(--color-text-danger); }
 .cj-proc-row.active .cj-proc-status { animation: cjpulse 1.4s ease-in-out infinite; }
 @keyframes cjpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
