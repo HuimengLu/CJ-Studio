@@ -15,3 +15,9 @@ opencv-python-headless>=4.9.0
 # Dockerfile pre-bakes; a future version could switch repos and break offline).
 withoutbg==1.0.6
 onnxruntime>=1.16.0
+
+# OpenAI gpt-image pipeline (New Listing / Social). Kept in sync with
+# requirements.txt — the backend imports these at startup of openai_engine.py,
+# so the Docker/Render image must include them or uploads 500 immediately.
+openai>=1.50.0
+python-dotenv>=1.0.0
