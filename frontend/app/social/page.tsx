@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CameraPlusIcon, PlusIcon } from "@/components/icons";
 import OptionCard from "@/components/OptionCard";
+import { saveBlob } from "../save-file";
 
 /* Social — the official social-graphic editor.
    Left panel: single-image upload, title + subtitle inputs, photo-ratio
@@ -220,11 +221,9 @@ export default function SocialPage() {
           .replace("/api/testing/render", "/api/social/download"),
       );
       const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `cj_social_${style}_${theme}_${ratio.replace(":", "x")}.png`;
-      a.click();
-      URL.revokeObjectURL(a.href);
+      // On phones this opens the share sheet ("Save Image" → photo album);
+      // on desktop it stays a normal download.
+      await saveBlob(blob, `cj_social_${style}_${theme}_${ratio.replace(":", "x")}.png`);
       setDownloadDone(true);
       setTimeout(() => setDownloadDone(false), 1600);
     } finally {

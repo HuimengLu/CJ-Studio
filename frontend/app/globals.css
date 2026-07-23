@@ -1001,7 +1001,9 @@ body {
 .cj-thumb {
   display: block; width: 72px; height: 72px; padding: 0; border-radius: var(--radius-md);
   border: 1px solid var(--color-border); background-size: cover; background-position: center;
-  background-repeat: no-repeat; background-color: transparent; cursor: pointer;
+  /* Solid placeholder shows the tile instantly while its thumbnail downloads —
+     without it the filmstrip looks empty for the first seconds on mobile. */
+  background-repeat: no-repeat; background-color: var(--line-soft); cursor: pointer;
   opacity: 0.55; transition: opacity 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 .cj-tw:hover .cj-thumb { opacity: 0.85; border-color: var(--color-border-strong); }
@@ -1550,16 +1552,21 @@ body {
   #cj-arc { display: none; }
   .cj-panel { flex-basis: 100%; width: 100%; }
   .cj-result { flex-direction: column; height: auto; }
-  /* Stacked layout puts the controls (and Download) above the preview, so the
-     button would otherwise sit before what it downloads — pin it to the
-     bottom of the viewport instead. */
-  .cj-soc-foot {
+  /* Stacked layout puts the controls (and Download/Export) after or far from
+     the preview, so the primary button would drift off-screen — pin it to the
+     bottom of the viewport instead. Applies to Social's Download and the
+     listing result's Export alike. */
+  .cj-soc-foot, .cj-lst-foot {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
     background: var(--bg);
     border-top: 1px solid var(--color-border-primary-surface);
     padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
   }
-  .cj-result:has(.cj-soc-foot) { padding-bottom: 72px; }
+  .cj-result:has(.cj-soc-foot), .cj-result:has(.cj-lst-foot) { padding-bottom: 72px; }
+  /* Keep the 1-2-3 wayfinding strip on a single row on narrow screens:
+     each label moves under its number instead of the strip wrapping. */
+  .cj-strip { flex-wrap: nowrap; gap: 1rem; }
+  .cj-step { flex-direction: column; gap: 5px; }
   .cj-edit-row { flex-direction: column; padding: 110px 24px 40px; }
   /* Stacked layout gives the stage auto height, so container-type:size would
      collapse it — fall back to letting the image size the box (no clipping

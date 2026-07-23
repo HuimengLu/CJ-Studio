@@ -13,8 +13,12 @@ const items = [
 export default function Sidebar() {
   const pathname = usePathname();
   const resetIfCurrent = (href: string) => {
-    if (href === "/") window.dispatchEvent(new Event("cj:reset-listing"));
-    else if (href === "/legacy" && pathname === "/legacy") {
+    // Only a re-click on the CURRENT page means "start over". Listing state
+    // now lives in a layout-level provider that survives navigation, so an
+    // unconditional reset here would wipe results on every return visit.
+    if (href === "/" && pathname === "/") {
+      window.dispatchEvent(new Event("cj:reset-listing"));
+    } else if (href === "/legacy" && pathname === "/legacy") {
       window.dispatchEvent(new Event("cj:reset-legacy"));
     }
   };

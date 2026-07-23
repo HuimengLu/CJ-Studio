@@ -5,6 +5,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import PageTitleBar from "@/components/PageTitleBar";
+import { ListingProvider } from "./listing-state";
 
 const caslon = Libre_Caslon_Text({
   weight: ["400", "700"],
@@ -40,7 +41,9 @@ export default function RootLayout({
         <Sidebar />
         <main className="cj-main">
           <PageTitleBar />
-          {children}
+          {/* Layouts survive route changes, so listing batches keep
+              processing while the user visits Social or the Library. */}
+          <ListingProvider>{children}</ListingProvider>
         </main>
         <Analytics />
         <SpeedInsights />
