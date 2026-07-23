@@ -36,7 +36,10 @@ WORKDIR /home/user/app
 # App code + the runtime assets the pipeline reads (see .dockerignore for what
 # stays out — the frontend and the legacy Streamlit app are not needed here).
 COPY --chown=user backend/ backend/
-COPY --chown=user static/social/ static/social/
+# Whole static/ tree (~11MB): social2 template masks, product_bg.png backdrop,
+# cover scene backgrounds, placeholder icon. Copying selectively has already
+# bitten us once (social2 + product_bg missing → Social 500s, wrong backdrop).
+COPY --chown=user static/ static/
 COPY --chown=user fonts/ fonts/
 COPY --chown=user bg_artwork.png .
 
