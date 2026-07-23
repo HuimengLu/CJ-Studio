@@ -697,9 +697,21 @@ body {
 /* Floating notice over the result stage (global errors: session expiry etc.) */
 .cj-result { position: relative; }
 .cj-warn-float {
-  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-  z-index: 60; margin: 0; max-width: min(560px, 70%);
+  /* Fixed to the viewport (not the result column): the toast can never be
+     cropped by the stage/panel boundary, and the width cap always fits the
+     screen. Sits below the page-title bar; above the pinned footer (40),
+     below modals (100). */
+  position: fixed; top: 68px; left: 50%; transform: translateX(-50%);
+  z-index: 90; margin: 0;
+  max-width: min(560px, calc(100vw - 32px));
+  width: max-content;
   box-shadow: var(--shadow);
+}
+/* The shared .cj-warn tint is ~92% transparent — fine in-flow on a white
+   page, illegible floated over imagery. Same hue, but opaque. Doubled-up
+   selector: .cj-warn is defined later in this file and would win otherwise. */
+.cj-warn.cj-warn-float {
+  background: color-mix(in oklab, var(--yellow-400) 8%, #fff);
 }
 
 /* Content badges on export-selection tiles (cover / dimension count). */
@@ -1587,6 +1599,8 @@ body {
      each label moves under its number instead of the strip wrapping. */
   .cj-strip { flex-wrap: nowrap; gap: 1rem; }
   .cj-step { flex-direction: column; gap: 5px; }
+  /* Clear the fixed top app bar (52px + notch inset). */
+  .cj-warn-float { top: calc(64px + env(safe-area-inset-top)); }
   .cj-edit-row { flex-direction: column; padding: 110px 24px 40px; }
   /* Stacked layout gives the stage auto height, so container-type:size would
      collapse it — fall back to letting the image size the box (no clipping
