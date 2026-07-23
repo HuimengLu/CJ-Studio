@@ -24,9 +24,8 @@ import {
    so batches keep running and results survive tab switches. This component
    is the view: DOM refs and hover/drag visuals only. */
 
-/* Filmstrip thumb that shimmers (skeleton-style) until its image has actually
-   downloaded — a bare gray square reads as "broken", a moving sheen as
-   "coming". The image is tracked via an off-DOM preload of the same URL. */
+/* Filmstrip thumb: flat gray with a tiny "cooking…" until its image has
+   actually downloaded (tracked via an off-DOM preload of the same URL). */
 function ThumbButton({ p, active, onClick }: {
   p: Photo; active: boolean; onClick: () => void;
 }) {
@@ -41,11 +40,13 @@ function ThumbButton({ p, active, onClick }: {
   }, [url]);
   return (
     <button
-      className={`cj-thumb${active ? " active" : ""}${loaded ? "" : " cj-shimmer"}`}
+      className={`cj-thumb${active ? " active" : ""}`}
       style={loaded ? { backgroundImage: `url(${url})` } : undefined}
       onClick={onClick}
       aria-label={p.name}
-    />
+    >
+      {!loaded && <span className="cj-thumb-cooking">cooking…</span>}
+    </button>
   );
 }
 
@@ -204,10 +205,9 @@ export default function ListingPage() {
               )
             }
           />
-          {/* No spinner here: the is-loading shimmer on the stage box IS the
-              loading state. Shimmer + spinner together read as two competing
-              signals (and the empty img area lets the shimmer show through
-              whenever pixels are actually missing). */}
+          {/* Single loading signal: the pac-man loader over the flat
+              is-loading base (which also holds the finished frame's size). */}
+          {imgLoading && <div className="cj-stage-loading"><div className="cj-pacman" /></div>}
         </div>
 
         {/* Always present — the "+" tile is the only way to add more photos. */}

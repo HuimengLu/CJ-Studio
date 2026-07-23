@@ -923,20 +923,56 @@ body {
 
 .cj-stage-loading { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.35); }
 
-/* Skeleton shimmer (moving sheen) for loading placeholders — filmstrip thumbs
-   waiting on their image, etc. Sits in background-image, so an element that
-   later gets an inline backgroundImage simply covers it. */
-@keyframes cj-shimmer-slide {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+/* The loading stage holds a flat neutral base under the pac-man loader. */
+.cj-stage.is-loading .cj-split { background: var(--line-soft); }
+
+/* Pac-man loader for the listing stage: a chomping disc eating dots that
+   drift in from the right. Colour adapted to the light stage (the reference
+   snippet used white). --size scales the whole thing. */
+.cj-pacman {
+  --color-1: var(--ink-soft);
+  --color-2: #0000;
+  --size: 1px;
+  width: calc(48 * var(--size));
+  height: calc(48 * var(--size));
+  position: relative;
+  border: calc(24 * var(--size)) solid var(--color-1);
+  border-radius: 50%;
+  box-sizing: border-box;
+  animation: cj-eat 1s linear infinite;
 }
-.cj-shimmer,
-.cj-stage.is-loading .cj-split {
-  background-image: linear-gradient(100deg,
-    var(--line-soft) 40%, rgba(255, 255, 255, 0.85) 50%, var(--line-soft) 60%);
-  background-size: 200% 100%;
-  background-position: 200% 0;
-  animation: cj-shimmer-slide 1.6s ease-in-out infinite;
+.cj-pacman::after,
+.cj-pacman::before {
+  content: '';
+  position: absolute;
+  left: calc(50 * var(--size));
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--color-1);
+  width: calc(15 * var(--size));
+  height: calc(15 * var(--size));
+  border-radius: 50%;
+  box-sizing: border-box;
+  opacity: 0;
+  animation: cj-move 2s linear infinite;
+}
+.cj-pacman::before { animation-delay: 1s; }
+@keyframes cj-eat {
+  0%, 49% { border-right-color: var(--color-1); }
+  50%, 100% { border-right-color: var(--color-2); }
+}
+@keyframes cj-move {
+  0% { left: calc(75 * var(--size)); opacity: 1; }
+  50% { left: 0; opacity: 1; }
+  52%, 100% { left: calc(-5 * var(--size)); opacity: 0; }
+}
+
+/* Filmstrip tile before its thumbnail has downloaded: flat gray base (from
+   .cj-thumb) with a tiny status word — visible immediately, no motion. */
+.cj-thumb-cooking {
+  display: flex; width: 100%; height: 100%;
+  align-items: center; justify-content: center;
+  font-size: 10px; color: var(--ink-soft); letter-spacing: 0.02em;
 }
 
 /* ── dimension annotation overlay ── */
@@ -1360,7 +1396,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .cj-lib-detail { animation: none; }
   .cj-lib-detail-stage img.in { animation: none; }
-  .cj-shimmer, .cj-stage.is-loading .cj-split { animation: none; }
+  /* Static disc (mouth closed, dots hidden) still marks the loading state. */
+  .cj-pacman, .cj-pacman::before, .cj-pacman::after { animation: none; }
 }
 .cj-lib-detail-side {
   flex: 1 1 600px; max-width: 600px; margin: auto 0; padding-right: 40px;
