@@ -121,8 +121,13 @@ async function downloadExport(items: object[], fallback: string) {
 }
 
 /* The size the result stage requests — prefetches must match it exactly for
-   the browser cache to be hit. */
-const STAGE_W = 1400;
+   the browser cache to be hit. Phones get a lighter render: 1400px is wasted
+   on a ~1100-device-pixel screen and mobile bandwidth is the bottleneck.
+   Only called client-side (the result stage never server-renders). */
+export const stageW = () =>
+  typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches
+    ? 1000
+    : 1400;
 
 function useListingState() {
   const [phase, setPhase] = useState<"home" | "processing" | "result">("home");
@@ -185,8 +190,8 @@ function useListingState() {
      screen appears these are already in the browser cache. */
   const prefetchPhoto = useCallback((id: string) => {
     const p: Photo = { id, name: "", ratio: "1:1", dimensions: [] };
-    prefetch(imgUrl(p, "after", STAGE_W));
-    prefetch(imgUrl(p, "before", STAGE_W));
+    prefetch(imgUrl(p, "after", stageW()));
+    prefetch(imgUrl(p, "before", stageW()));
     prefetch(thumbUrl(p));
   }, [prefetch]);
 
@@ -199,8 +204,8 @@ function useListingState() {
     if (phase !== "result" || !photo || imgLoading) return;
     for (const r of RATIOS) {
       if (r.id === photo.ratio) continue;
-      prefetch(imgUrl({ ...photo, ratio: r.id }, "after", STAGE_W));
-      prefetch(imgUrl({ ...photo, ratio: r.id }, "before", STAGE_W));
+      prefetch(imgUrl({ ...photo, ratio: r.id }, "after", stageW()));
+      prefetch(imgUrl({ ...photo, ratio: r.id }, "before", stageW()));
     }
   }, [phase, photo, imgLoading, prefetch]);
 

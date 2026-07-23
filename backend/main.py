@@ -268,25 +268,28 @@ def _testing2_png(rec: dict, ratio: str, kind: str, width: int | None) -> bytes:
     if width and width < img.width:
         img = img.resize((width, round(img.height * width / img.width)),
                          Image.LANCZOS)
-    png = pipeline.to_png_bytes(img)
+    # JPEG for on-screen previews: a 1400px stage PNG is ~2MB vs ~250KB as
+    # JPEG-85 — on mobile connections that difference IS the loading time.
+    # Downloads keep full-quality PNG via the separate /export path.
+    jpg = pipeline.to_jpeg_bytes(img, quality=85)
     if len(cache) > 16:
         cache.clear()
-    cache[key] = png
-    return png
+    cache[key] = jpg
+    return jpg
 
 
 @app.get("/api/testing2/{tid}/image")
 def testing2_image(tid: str, ratio: str = "1:1", kind: str = "after",
                    w: int | None = None):
     rec = _get_testing2(tid)
-    png = _testing2_png(rec, ratio, kind, w)
+    jpg = _testing2_png(rec, ratio, kind, w)
     # A given (id, kind, ratio, w) never changes once it exists (the plate is
     # fixed at upload; covers get their own kind and 404 until generated), so
     # let the browser cache it — the frontend prefetches the other ratios and
     # relies on these being cache hits for instant ratio switching. `private`
     # keeps shared proxies out of it. no-store here made every ratio switch a
     # full re-download and the prefetch pure wasted bandwidth.
-    return Response(png, media_type="image/png",
+    return Response(jpg, media_type="image/jpeg",
                     headers={"Cache-Control": "private, max-age=3600"})
 
 

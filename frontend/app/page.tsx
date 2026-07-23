@@ -1,12 +1,13 @@
 "use client";
 
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import CompareSlider from "@/components/CompareSlider";
 import DimensionOverlay from "@/components/DimensionOverlay";
 import { ArrowClockwiseIcon, CameraPlusIcon, CheckCircleIcon, CircleIcon } from "@/components/icons";
 import OptionCard from "@/components/OptionCard";
 import {
-  RATIOS, RATIO_AR, SESSION_EXPIRED, entryKey, imgUrl, thumbUrl, useListing,
+  RATIOS, RATIO_AR, SESSION_EXPIRED, entryKey, imgUrl, stageW, thumbUrl, useListing,
+  type Photo,
 } from "./listing-state";
 
 /* New Listing — the primary photo-processing pipeline: gpt-image-2 redraws the
@@ -22,6 +23,31 @@ import {
    All processing state lives in listing-state.tsx (a layout-level provider),
    so batches keep running and results survive tab switches. This component
    is the view: DOM refs and hover/drag visuals only. */
+
+/* Filmstrip thumb that shimmers (skeleton-style) until its image has actually
+   downloaded — a bare gray square reads as "broken", a moving sheen as
+   "coming". The image is tracked via an off-DOM preload of the same URL. */
+function ThumbButton({ p, active, onClick }: {
+  p: Photo; active: boolean; onClick: () => void;
+}) {
+  const url = thumbUrl(p);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    setLoaded(false);
+    const img = new window.Image();
+    img.onload = () => setLoaded(true);
+    img.src = url;
+    return () => { img.onload = null; };
+  }, [url]);
+  return (
+    <button
+      className={`cj-thumb${active ? " active" : ""}${loaded ? "" : " cj-shimmer"}`}
+      style={loaded ? { backgroundImage: `url(${url})` } : undefined}
+      onClick={onClick}
+      aria-label={p.name}
+    />
+  );
+}
 
 function StepsStrip({ current = 0 }: { current?: number }) {
   const steps = ["Upload", "Optimize", "Export"];
@@ -149,11 +175,13 @@ export default function ListingPage() {
         </div>
       )}
       <div className="cj-canvas-col">
-        <div className="cj-stage">
+        {/* is-loading lets mobile CSS hold the stage at the finished frame's
+            aspect ratio while pixels are still downloading. */}
+        <div className={`cj-stage${imgLoading ? " is-loading" : ""}`}>
           <CompareSlider
             key={entryKey(photo)}
-            beforeSrc={imgUrl(photo, "before", 1400)}
-            afterSrc={imgUrl(photo, "after", 1400)}
+            beforeSrc={imgUrl(photo, "before", stageW())}
+            afterSrc={imgUrl(photo, "after", stageW())}
             aspectRatio={RATIO_AR[photo.ratio]}
             animate={animate}
             restX={0}
@@ -185,11 +213,10 @@ export default function ListingPage() {
             {photos.map((p, i) => (
               <Fragment key={entryKey(p)}>
                 <div className="cj-tw">
-                  <button
-                    className={`cj-thumb${i === active ? " active" : ""}`}
-                    style={{ backgroundImage: `url(${thumbUrl(p)})` }}
+                  <ThumbButton
+                    p={p}
+                    active={i === active}
                     onClick={() => { if (i !== active) { setActive(i); setImgLoading(true); setDimMode(false); setAnimate(true); } }}
-                    aria-label={p.name}
                   />
                   <button className="cj-delbtn" onClick={() => setConfirmDelete(i)} aria-label={`Delete ${p.name}`}>
                     ✕

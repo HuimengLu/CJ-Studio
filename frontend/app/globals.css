@@ -908,6 +908,22 @@ body {
 
 .cj-stage-loading { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.35); }
 
+/* Skeleton shimmer (moving sheen) for loading placeholders — filmstrip thumbs
+   waiting on their image, etc. Sits in background-image, so an element that
+   later gets an inline backgroundImage simply covers it. */
+@keyframes cj-shimmer-slide {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.cj-shimmer,
+.cj-stage.is-loading .cj-split {
+  background-image: linear-gradient(100deg,
+    var(--line-soft) 40%, rgba(255, 255, 255, 0.85) 50%, var(--line-soft) 60%);
+  background-size: 200% 100%;
+  background-position: 200% 0;
+  animation: cj-shimmer-slide 1.6s ease-in-out infinite;
+}
+
 /* ── dimension annotation overlay ── */
 /* Clips overlays to the after side of the compare divider (left inset follows
    the divider). pointer-events: none so divider scrubbing still works; the
@@ -1329,6 +1345,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .cj-lib-detail { animation: none; }
   .cj-lib-detail-stage img.in { animation: none; }
+  .cj-shimmer, .cj-stage.is-loading .cj-split { animation: none; }
 }
 .cj-lib-detail-side {
   flex: 1 1 600px; max-width: 600px; margin: auto 0; padding-right: 40px;
@@ -1573,6 +1590,13 @@ body {
      risk here since nothing constrains its height). */
   .cj-stage { container-type: normal; }
   .cj-split { width: auto; aspect-ratio: auto; }
+  /* While the stage image is still downloading the box would collapse to a
+     thin strip — hold it at the finished frame's exact shape (the slider
+     already carries the output ratio in --cj-ar) so the placeholder matches
+     the real image and nothing jumps when pixels arrive. */
+  .cj-stage.is-loading .cj-split {
+    width: 100%; aspect-ratio: var(--cj-ar, 1); overflow: hidden;
+  }
   .cj-after-img {
     position: relative; inset: auto; width: auto; height: auto;
     max-width: 100%; max-height: 100%; object-fit: fill;
