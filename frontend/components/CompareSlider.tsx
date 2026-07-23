@@ -43,6 +43,12 @@ export default function CompareSlider({
   // capture once: the reveal decision belongs to this mount only, so a parent
   // re-render flipping the prop mid-sweep can't cancel the animation
   const reveal = useRef(animate).current;
+  // The reveal sweep must not start until BOTH images have decoded — kicked
+  // off on mount it runs invisibly behind the loading state, so the sweep is
+  // already over by the time pixels appear. (Error counts as "ready" so a
+  // missing before image can't block the after side forever.)
+  const [beforeReady, setBeforeReady] = useState(false);
+  const [afterReady, setAfterReady] = useState(false);
   const [x, setX] = useState(reveal ? 100 : restX);
   const xRef = useRef(x);
   xRef.current = x;
@@ -72,9 +78,12 @@ export default function CompareSlider({
     return () => { controlRef.current = null; };
   }, [controlRef, animateTo]);
 
-  // initial reveal: sweep 100 → 0 once per mount
+  // initial reveal: sweep 100 → 0, once per mount, only after both images
+  // decoded (loading animation first, THEN the before/after reveal).
+  const swept = useRef(false);
   useEffect(() => {
-    if (!reveal) return;
+    if (!reveal || swept.current || !beforeReady || !afterReady) return;
+    swept.current = true;
     let t0: number | null = null;
     const dur = 2000;
     const step = (ts: number) => {
@@ -88,8 +97,7 @@ export default function CompareSlider({
     return () => {
       if (raf.current) cancelAnimationFrame(raf.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reveal, beforeReady, afterReady]);
 
   const fromEvent = (clientX: number) => {
     const r = boxRef.current?.getBoundingClientRect();
@@ -122,13 +130,24 @@ export default function CompareSlider({
       onPointerUp={onPointerUp}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img className="cj-after-img" src={afterSrc} alt="Enhanced" onLoad={onAfterLoaded} onError={onAfterError} />
+      <img
+        className="cj-after-img"
+        src={afterSrc}
+        alt="Enhanced"
+        onLoad={() => { setAfterReady(true); onAfterLoaded?.(); }}
+        onError={onAfterError}
+      />
       <div
         className="cj-before-wrap"
         style={{ clipPath: `polygon(0 0, ${x}% 0, ${x}% 100%, 0 100%)` }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={beforeSrc} alt="Original" />
+        <img
+          src={beforeSrc}
+          alt="Original"
+          onLoad={() => setBeforeReady(true)}
+          onError={() => setBeforeReady(true)}
+        />
       </div>
       <div className="cj-slider" style={{ left: `${x}%` }} />
       <button className="cj-tag cj-tag-l" onClick={() => animateTo(100)}>

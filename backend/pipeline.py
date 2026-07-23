@@ -1125,5 +1125,8 @@ def to_png_bytes(img: Image.Image, optimize: bool = False) -> bytes:
 
 def to_jpeg_bytes(img: Image.Image, quality: int = 85) -> bytes:
     buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="JPEG", quality=quality)
+    # progressive: browsers paint a coarse full frame from the first scan and
+    # sharpen as bytes arrive — on slow mobile connections the preview appears
+    # in a fraction of the full download time (baseline JPEG reveals top-down).
+    img.convert("RGB").save(buf, format="JPEG", quality=quality, progressive=True)
     return buf.getvalue()
