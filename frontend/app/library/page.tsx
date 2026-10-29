@@ -39,17 +39,29 @@ export default function LibraryPage() {
   const [sel, setSel] = useState<Item | null>(null);
   const [confirmDel, setConfirmDel] = useState<Item | null>(null);
   const [cols, setCols] = useState(4);
-  // Paging animation: which side the incoming image slides from (+1 = next,
-  // -1 = prev, 0 = plain fade), and whether it has loaded (the slide plays on
-  // load, not on keypress — animating a blank frame helps no one).
-  const [pageDir, setPageDir] = useState(0);
+  // Whether the current detail image has loaded — the float-up plays on load,
+  // not on keypress (animating a blank frame helps no one). Paging and first
+  // open share the exact same rise, per design review.
   const [imgLoaded, setImgLoaded] = useState(false);
 
-  const openDetail = useCallback((item: Item, dir = 0) => {
-    setPageDir(dir);
+  const openDetail = useCallback((item: Item) => {
     setImgLoaded(false);
     setSel(item);
   }, []);
+
+  /* Closing plays a 480ms fade-down first (the enter animation in reverse) —
+     unmounting instantly read as a flicker. Reduced motion skips straight to
+     the unmount. */
+  const [closing, setClosing] = useState(false);
+  const closeDetail = useCallback(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) setSel(null);
+    else setClosing(true);
+  }, []);
+  useEffect(() => {
+    if (!closing) return;
+    const t = setTimeout(() => { setSel(null); setClosing(false); }, 500);
+    return () => clearTimeout(t);
+  }, [closing]);
 
   useEffect(() => {
     fetch("/api/library")
@@ -79,20 +91,20 @@ export default function LibraryPage() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (confirmDel) setConfirmDel(null);
-        else if (sel) setSel(null);
+        else if (sel) closeDetail();
         return;
       }
-      if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && sel && !confirmDel) {
+      if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && sel && !confirmDel && !closing) {
         const dir = e.key === "ArrowRight" ? 1 : -1;
         const idx = items.findIndex((i) => i.id === sel.id);
         const next = idx + dir;
-        if (next >= 0 && next < items.length) openDetail(items[next], dir);
+        if (next >= 0 && next < items.length) openDetail(items[next]);
         e.preventDefault();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, confirmDel, items, openDetail]);
+  }, [sel, confirmDel, items, openDetail, closeDetail, closing]);
 
   // Preload the neighbours of the open item so arrow-paging feels instant —
   // the real latency here is the multi-MB PNG, not the animation.
@@ -138,7 +150,16 @@ export default function LibraryPage() {
   const cell = (it: Item) => (
     <div key={it.id} className="cj-lib-cell" onDoubleClick={() => openDetail(it)}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img className="cj-lib-img" src={`/api/library/${it.id}/thumb`} alt={it.name} loading="lazy" />
+      <img
+        className="cj-lib-img"
+        src={`/api/library/${it.id}/thumb`}
+        alt={it.name}
+        loading="lazy"
+        /* Fade in once decoded; cached images can be complete before hydration,
+           so the ref covers loads whose onLoad already fired. */
+        ref={(el) => { if (el?.complete && el.naturalWidth > 0) el.classList.add("loaded"); }}
+        onLoad={(e) => e.currentTarget.classList.add("loaded")}
+      />
       <div className="cj-lib-actions">
         <button className="cj-lib-iconbtn tl" title="Delete" aria-label={`Delete ${it.name}`}
           onClick={() => setConfirmDel(it)}>
@@ -184,20 +205,24 @@ export default function LibraryPage() {
 
       {/* ── full-screen detail (double-click or the corners icon; ←/→ browse) ── */}
       {sel && (
-        <div className="cj-lib-detail" role="dialog" aria-label={sel.name}>
-          <div className="cj-lib-detail-stage">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              key={sel.id}
-              src={`/api/library/${sel.id}/image`}
-              alt={sel.name}
-              className={imgLoaded ? "in" : ""}
-              style={{ "--page-from": `${pageDir * 12}px` } as React.CSSProperties}
-              onLoad={() => setImgLoaded(true)}
-              onError={() => setImgLoaded(true)}
-            />
-          </div>
-          <div className="cj-lib-detail-side">
+        <div className={`cj-lib-detail${closing ? " out" : ""}`} role="dialog" aria-label={sel.name}>
+          {/* Keyed per item: arrow-paging remounts the whole body, so a page
+              turn replays the exact entrance ensemble a first open plays —
+              envelope fade/scale + image rise + meta float. Layout widths
+              stay fixed; only opacity/transform move. */}
+          <div key={sel.id} className="cj-lib-detail-body">
+            <div className="cj-lib-detail-stage">
+              {/* Rise-from-below waits for the image to decode. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/api/library/${sel.id}/image`}
+                alt={sel.name}
+                className={imgLoaded ? "in" : ""}
+                onLoad={() => setImgLoaded(true)}
+                onError={() => setImgLoaded(true)}
+              />
+            </div>
+            <div className={`cj-lib-detail-side${imgLoaded ? " in" : ""}`}>
             <div className="cj-lib-detail-meta">
               <span>
                 {sel.kind === "cover" ? "cover scene"
@@ -211,8 +236,9 @@ export default function LibraryPage() {
               <DownloadSimpleIcon size={16} />
               <span>Download</span>
             </button>
+            </div>
           </div>
-          <button className="cj-lib-close" aria-label="Close" onClick={() => setSel(null)}>
+          <button className="cj-lib-close" aria-label="Close" onClick={closeDetail}>
             ✕
           </button>
         </div>
@@ -222,7 +248,7 @@ export default function LibraryPage() {
       {confirmDel && (
         <div className="cj-modal-scrim" onClick={() => setConfirmDel(null)}>
           <div className="cj-modal small" onClick={(e) => e.stopPropagation()}>
-            <div className="cj-modal-head"><h2>Delete photo</h2></div>
+            <div className="cj-modal-head"><h2>Delete Photo</h2></div>
             <div className="cj-modal-text">
               Remove <b>{confirmDel.name}</b> from the library? This cannot be undone.
             </div>

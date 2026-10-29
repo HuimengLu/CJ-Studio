@@ -54,7 +54,7 @@ export default function Sidebar() {
             </Link>
             <div className="cj-tooltip" role="tooltip">
               <span className="cj-tooltip-title">Legacy Listing</span>
-              <span className="cj-tooltip-desc">Runs on this machine — no AI credits used</span>
+              <span className="cj-tooltip-desc">Runs on this machine. No AI credits used</span>
             </div>
           </div>
         </div>

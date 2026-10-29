@@ -44,6 +44,7 @@ export type ProcRow = {
   thumb: string | null;
   state: "waiting" | "active" | "done" | "error";
   warn?: string;
+  activeAt?: number;   // when processing started — drives the live batch %
 };
 
 /* A failed upload kept in the filmstrip so it can be retried in place —
@@ -108,7 +109,7 @@ async function processFile(f: File): Promise<{ id?: string; warn?: string }> {
 /* Shown whenever a photo's server-side record is gone (the in-memory backend
    was restarted) — the only fix is re-uploading. */
 export const SESSION_EXPIRED =
-  "Session expired — the server restarted and these photos are gone. Please re-upload.";
+  "Session expired. The server restarted and these photos are gone. Please re-upload.";
 
 async function downloadExport(items: object[], fallback: string) {
   const res = await fetch("/api/testing2/export", {
@@ -116,11 +117,28 @@ async function downloadExport(items: object[], fallback: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ items }),
   });
-  if (!res.ok) throw new Error(res.status === 404 ? SESSION_EXPIRED : `Export failed (${res.status}) — please retry.`);
+  if (!res.ok) throw new Error(res.status === 404 ? SESSION_EXPIRED : `Export failed (${res.status}). Please retry.`);
   const blob = await res.blob();
   const m = (res.headers.get("Content-Disposition") ?? "").match(/filename="([^"]+)"/);
   await saveBlob(blob, m?.[1] ?? fallback);
 }
+
+/* The item bars animate with CSS `cjfill 45s cubic-bezier(0.3, 0.6, 0.4,
+   0.9)`; this evaluates the same curve in JS so the batch bar can be the
+   live average of exactly what the item bars show. x = elapsed fraction of
+   the 45s window, returns displayed progress fraction. */
+export const fillCurve = (x: number) => {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const cx = (u: number) => 3 * (1 - u) * (1 - u) * u * 0.3 + 3 * (1 - u) * u * u * 0.4 + u * u * u;
+  const cy = (u: number) => 3 * (1 - u) * (1 - u) * u * 0.6 + 3 * (1 - u) * u * u * 0.9 + u * u * u;
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (cx(mid) < x) lo = mid; else hi = mid;
+  }
+  return cy((lo + hi) / 2);
+};
 
 /* The size the result stage requests — prefetches must match it exactly for
    the browser cache to be hit. Phones get a lighter render: 1400px is wasted
@@ -139,6 +157,9 @@ function useListingState() {
   const [warn, setWarn] = useState<string | null>(null);
   const [animate, setAnimate] = useState(false);
   const [imgLoading, setImgLoading] = useState(false);
+  /* True while the pending image load is a quiet one (ratio switch on the
+     same photo) — the stage skips the loading veil for those. */
+  const [quietLoad, setQuietLoad] = useState(false);
   const [pending, setPending] = useState<ProcRow[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -249,7 +270,12 @@ function useListingState() {
     return () => window.removeEventListener("cj:reset-listing", resetToHome);
   }, [resetToHome]);
 
+  /* Ratio switches load quietly: the other ratios are prefetched, so the swap
+     is a cache hit and the loading veil would just flash over the frame morph.
+     imgLoading itself stays on — mobile CSS still needs is-loading to hold the
+     frame shape, and onAfterLoaded needs the reset. */
   const mutatePhoto = useCallback((patch: Partial<Photo>) => {
+    setQuietLoad(true);
     setImgLoading(true);
     setPhotos((ps) => ps.map((p, i) => (i === active ? { ...p, ...patch } : p)));
   }, [active]);
@@ -264,7 +290,7 @@ function useListingState() {
     const results = await runPool(
       files.map((f, i) => async () => {
         if (cancelled.current) return null;
-        setRows((r) => r.map((row, j) => (j === i ? { ...row, state: "active" } : row)));
+        setRows((r) => r.map((row, j) => (j === i ? { ...row, state: "active", activeAt: Date.now() } : row)));
         const out = await processFile(f);
         if (out.id) prefetchPhoto(out.id);
         setRows((r) => r.map((row, j) =>
@@ -294,7 +320,9 @@ function useListingState() {
       setAnimate(true);
       // The stage image may still be in flight (prefetch warms it, but can't
       // guarantee it) — show the loading veil until CompareSlider reports in,
-      // instead of a blank stage.
+      // instead of a blank stage. quietLoad may be stale true from a ratio
+      // switch on the previous batch.
+      setQuietLoad(false);
       setImgLoading(true);
       setPhase("result");
     } else {
@@ -379,7 +407,7 @@ function useListingState() {
       const res = await fetch(`/api/testing2/${id}/cover`, { method: "POST" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.ok) {
-        setWarn(res.status === 404 ? SESSION_EXPIRED : (j.warn ?? "Cover generation failed — please retry."));
+        setWarn(res.status === 404 ? SESSION_EXPIRED : (j.warn ?? "Cover generation failed. Please retry."));
         return;
       }
       setPhotos((ps) => {
@@ -463,7 +491,7 @@ function useListingState() {
       setExportOpen(false);
       flashSaved();
     } catch (e) {
-      setWarn(e instanceof Error ? e.message : "Export failed — please retry.");
+      setWarn(e instanceof Error ? e.message : "Export failed. Please retry.");
     } finally {
       setExporting(false);
     }
@@ -475,19 +503,38 @@ function useListingState() {
       [{ id: photo.id, ratio: photo.ratio, kind: photo.variant === "cover" ? "cover" : "after", dimensions: photo.dimensions }],
       `cj_listing_${photo.ratio.replace(":", "x")}.png`,
     ).then(flashSaved)
-      .catch((e) => setWarn(e instanceof Error ? e.message : "Export failed — please retry."));
+      .catch((e) => setWarn(e instanceof Error ? e.message : "Export failed. Please retry."));
   }, [photo, flashSaved]);
 
+  /* Live batch % = the equal-weight average of what every item bar currently
+     shows: finished rows count 1, queued rows the bars' 6% resting fill, and
+     in-flight rows the same 45s curve their own bar animates with (fillCurve).
+     A ticking clock re-samples it, so the bar climbs in real time instead of
+     stepping only on completions. Capped at 99 until everything finished. */
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (phase !== "processing") return;
+    const id = setInterval(() => setNow(Date.now()), 300);
+    return () => clearInterval(id);
+  }, [phase]);
   const donePct = useMemo(() => {
-    const done = rows.filter((r) => r.state === "done" || r.state === "error").length;
-    return rows.length ? Math.round((done / rows.length) * 100) : 0;
-  }, [rows]);
+    if (!rows.length) return 0;
+    const sum = rows.reduce((acc, r) => {
+      if (r.state === "done" || r.state === "error") return acc + 1;
+      if (r.state === "active" && r.activeAt) {
+        return acc + fillCurve((now - r.activeAt) / 45000);
+      }
+      return acc + 0.06;
+    }, 0);
+    const finished = rows.every((r) => r.state === "done" || r.state === "error");
+    return Math.min(Math.round((sum / rows.length) * 100), finished ? 100 : 99);
+  }, [rows, now]);
 
   return {
-    phase, rows, photos, active, warn, animate, imgLoading, pending,
+    phase, rows, photos, active, warn, animate, imgLoading, quietLoad, pending,
     confirmDelete, exportOpen, exportSel, exporting, dimMode, coverBusy,
     failed, savedNote, newCovers, undoDelete, photo, donePct, sliderCtl,
-    setPhotos, setActive, setWarn, setAnimate, setImgLoading, setDimMode,
+    setPhotos, setActive, setWarn, setAnimate, setImgLoading, setQuietLoad, setDimMode,
     setConfirmDelete, setExportOpen, setExportSel,
     startBatch, cancelBatch, addMore, retryFailed, toggleCover,
     deletePhoto, undoRemove, exportSelected, exportSingle, mutatePhoto,

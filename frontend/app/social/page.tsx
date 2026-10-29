@@ -30,9 +30,9 @@ const SUBTITLE_MAX = 120;
 
 type ThemeId = "green" | "lime" | "white";
 const THEMES: { id: ThemeId; label: string; fill: string }[] = [
-  { id: "green", label: "Dark", fill: "#005618" },
-  { id: "lime", label: "Light", fill: "#BCF00E" },
-  { id: "white", label: "White", fill: "#FFFFFF" },
+  { id: "green", label: "Forest", fill: "#005618" },
+  { id: "lime", label: "Lime", fill: "#BCF00E" },
+  { id: "white", label: "Paper", fill: "#FFFFFF" },
 ];
 
 type StyleId =
@@ -94,9 +94,9 @@ const ALL_TEMPLATES: Template[] = TEMPLATE_GROUPS.flatMap((g) => g.templates);
 function incompatReason(
   t: Template, hasImage: boolean, hasTitle: boolean, hasSubtitle: boolean,
 ): string | null {
-  if (!t.requiresImage && hasImage) return "Text-only template — your photo won't be used";
-  if (!t.supportsTitle && (hasTitle || hasSubtitle)) return "Image-only template — your text won't appear";
-  if (!t.supportsSubtitle && hasSubtitle) return "This template has no subtitle slot — it won't appear";
+  if (!t.requiresImage && hasImage) return "Text-only template. Your photo won't be used";
+  if (!t.supportsTitle && (hasTitle || hasSubtitle)) return "Image-only template. Your text won't appear";
+  if (!t.supportsSubtitle && hasSubtitle) return "This template has no subtitle slot. It won't appear";
   return null;
 }
 
@@ -141,6 +141,10 @@ export default function SocialPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadDone, setDownloadDone] = useState(false);
   const [titleTruncated, setTitleTruncated] = useState(false);
+  /* Filmstrip tooltip: the strip scrolls horizontally, so an absolutely
+     positioned card would be clipped — one fixed-position card follows the
+     hovered thumb instead (global .cj-tooltip look). */
+  const [thumbTip, setThumbTip] = useState<{ title: string; desc: string | null; x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (applied.title === title && applied.subtitle === subtitle) return;
@@ -177,7 +181,7 @@ export default function SocialPage() {
       const res = await fetch("/api/social/upload", { method: "POST", body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.id) {
-        setUploadErr("Upload failed — please try another image.");
+        setUploadErr("Upload failed. Please try another image.");
         return;
       }
       setPhoto((prev) => {
@@ -186,7 +190,7 @@ export default function SocialPage() {
       });
       setStageLoading(true);
     } catch {
-      setUploadErr("Upload failed — connection error.");
+      setUploadErr("Upload failed: connection error.");
     } finally {
       setUploading(false);
     }
@@ -293,7 +297,7 @@ export default function SocialPage() {
               />
               {titleTruncated && (
                 <p className="cj-hint cj-trunc-hint" role="status">
-                  Part of the title won&apos;t fit this template — it&apos;ll be
+                  Part of the title won&apos;t fit this template. It&apos;ll be
                   shortened with &ldquo;…&rdquo; in the image.
                 </p>
               )}
@@ -303,12 +307,17 @@ export default function SocialPage() {
                 <span className="cj-label">Subtitle (Optional)</span>
                 <span className="cj-count">{subtitle.length}/{SUBTITLE_MAX}</span>
               </div>
-              <input
-                className="cj-desc-input"
+              {/* Fixed 3-row box; longer text scrolls inside. Enter is
+                  swallowed — the rendered subtitle wraps on its own and a
+                  literal newline would leak into the render URL. */}
+              <textarea
+                className="cj-desc-input cj-desc-area"
                 placeholder="Enter your short description here"
                 maxLength={SUBTITLE_MAX}
+                rows={3}
                 value={subtitle}
                 onChange={(e) => setSubtitle(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
               />
             </div>
           </div>
@@ -365,7 +374,7 @@ export default function SocialPage() {
           </div>
           {renderErr && (
             <div className="cj-warn cj-stage-err">
-              Preview failed to load — is the backend running? Change any option to retry.
+              Preview failed to load. Is the backend running? Change any option to retry.
             </div>
           )}
           {stageLoading && (
@@ -374,25 +383,40 @@ export default function SocialPage() {
         </div>
         {selectedReason && (
           <div className="cj-warn cj-film-warn">
-            {selectedReason} — pick a highlighted template, or adjust your content.
+            {selectedReason}. Pick a highlighted template, or adjust your content.
           </div>
         )}
-        <div className="cj-film">
+        {thumbTip && (
+          <div
+            className="cj-tooltip cj-tooltip-thumb"
+            role="tooltip"
+            style={{ left: thumbTip.x, top: thumbTip.y }}
+          >
+            <span className="cj-tooltip-title">{thumbTip.title}</span>
+            {thumbTip.desc && <span className="cj-tooltip-desc">{thumbTip.desc}</span>}
+          </div>
+        )}
+        <div className="cj-film" onScroll={() => setThumbTip(null)}>
           {TEMPLATE_GROUPS.map((g) => (
             <div className="cj-film-group" key={g.label}>
               <span className="cj-film-cat">{g.label}</span>
               {g.templates.map((t) => {
                 const reason = incompatReason(t, hasImage, hasTitle, hasSubtitle);
                 const photoBadge = !reason && needsPhoto(t, hasImage, hasTitle, hasSubtitle);
-                const tip = reason ? `${t.label} — ${reason}`
-                  : photoBadge ? `${t.label} — add a photo to complete it` : t.label;
+                const tipDesc = reason ?? (photoBadge ? "Add a photo to complete it" : null);
                 return (
                   <button
                     key={t.id}
-                    title={tip}
-                    aria-label={tip}
+                    aria-label={tipDesc ? `${t.label}: ${tipDesc}` : t.label}
                     aria-disabled={!!reason}
                     className={`cj-tpl-thumb${t.id === style ? " active" : ""}${reason ? " dim" : ""}`}
+                    onMouseEnter={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect();
+                      // Clamp so the card (max-width 236px) never leaves the viewport.
+                      const x = Math.min(Math.max(r.left + r.width / 2, 126), window.innerWidth - 126);
+                      setThumbTip({ title: t.label, desc: tipDesc, x, y: r.top });
+                    }}
+                    onMouseLeave={() => setThumbTip(null)}
                     onClick={() => {
                       if (reason || t.id === style) return;
                       setStageLoading(true);

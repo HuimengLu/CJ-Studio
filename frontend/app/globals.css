@@ -270,7 +270,7 @@
   --transition-ease-basic: cubic-bezier(0.4, 0, 0.2, 1);
 
   /* theme layer (spec, verbatim; #1's unbalanced quote fixed, struck-out #81 omitted) */
-  --font-sans: "CJ Studio Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
   --font-mono: "SF Mono", "SFMono-Regular", ui-monospace, consolas, liberation mono, menlo, monospace;
   --spacing: .25rem;
   --breakpoint-sm: 576px;
@@ -627,6 +627,18 @@ body {
 }
 .cj-tooltip-title { font-size: var(--text-sm); line-height: 20px; color: var(--color-gray-1000); }
 .cj-tooltip-desc { font-size: var(--text-xs); line-height: 18px; color: var(--color-text-secondary); }
+/* Same card, but escaping a scroll container: fixed at the hovered element's
+   top-center (inline left/top), floating 6px above it. Mounted on hover, so
+   the standard 0.1s delay comes from the animation instead of a transition. */
+.cj-tooltip-thumb {
+  position: fixed; bottom: auto;
+  transform: translate(-50%, calc(-100% - 6px));
+  animation: cj-tip-in var(--default-transition-duration) var(--default-transition-timing-function) 0.1s both;
+}
+@keyframes cj-tip-in {
+  from { opacity: 0; visibility: hidden; }
+  to   { opacity: 1; visibility: visible; }
+}
 
 /* ── Mobile top app bar (hidden on desktop, replaces the sidebar ≤900px) ──── */
 #cj-topbar { display: none; }
@@ -829,14 +841,20 @@ body {
   font-size: var(--text-2xs); font-weight: var(--font-weight-semibold);
 }
 .cj-steplbl { font-size: var(--text-xs); color: var(--color-text-secondary); font-weight: var(--font-weight-medium); }
-.cj-dash { color: var(--color-border-strong); }
+/* Step connector: a real hairline, not a dash glyph. */
+.cj-dash { width: 20px; height: 1px; background: var(--color-border-strong); align-self: center; }
 .cj-step .cj-num, .cj-step .cj-steplbl {
   transition: background var(--default-transition-duration) var(--default-transition-timing-function),
-              color var(--default-transition-duration) var(--default-transition-timing-function);
+              color var(--default-transition-duration) var(--default-transition-timing-function),
+              opacity var(--default-transition-duration) var(--default-transition-timing-function);
 }
-/* "You are here" reads through a contrast step, not an inversion — the strip
-   is wayfinding, and must never compete with the primary action above it. */
-.cj-step.active .cj-num { background: var(--color-background-primary-soft-active); color: var(--color-text); }
+/* "You are here" reads through DIMMING the other steps, not inverting the
+   current one — the strip is wayfinding and must never compete with the
+   primary action above it. The active circle keeps a light ground (a shade
+   lighter than the old active gray-200; ink-on-gray-150 clears AAA). */
+.cj-step:not(.active) .cj-num,
+.cj-step:not(.active) .cj-steplbl { opacity: 0.5; }
+.cj-step.active .cj-num { background: var(--gray-150); color: var(--color-text); }
 .cj-step.active .cj-steplbl { color: var(--color-text); }
 
 .cj-warn {
@@ -860,14 +878,42 @@ body {
   font-family: var(--sans);
 }
 .cj-proc-cancel:hover { color: var(--ink-soft); }
-.cj-proc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line-soft); }
+/* No divider under the header: the batch track sits right below, and a 1px
+   rule next to an (empty-at-0%) 2px track read as two identical lines. The
+   track itself is the separator — 6px and pill-shaped so it reads as a
+   progress control even when empty, and taller than the 2px item bars so the
+   batch/item hierarchy is visible. */
+.cj-proc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .cj-proc-head-label { font-size: 14px; font-weight: 600; color: var(--ink); }
 .cj-proc-head-pct { font-size: 12px; color: var(--ink-soft); }
-.cj-proc-head-track { width: 100%; height: 2px; background: var(--chip); position: relative; overflow: hidden; margin-top: 10px; }
+.cj-proc-head-sub { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+.cj-proc-head-track { width: 100%; height: 4px; border-radius: 999px; background: var(--chip); position: relative; overflow: hidden; margin-top: 10px; }
 .cj-proc-head-fill { position: absolute; top: 0; left: 0; height: 100%; background: var(--ink); transition: width 0.4s ease; }
 .cj-proc-list { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; max-height: 300px; padding-right: 4px; }
+/* Checklist variant (multi-photo batches): rows lose their card chrome and
+   per-row bars; hairlines run BETWEEN rows only. The first row deliberately
+   has no top border, so no line sits under the batch track to read as
+   another bar. */
+.cj-proc-list.checklist { gap: 0; margin-top: 4px; }
+.cj-proc-list.checklist .cj-proc-row { border: none; border-radius: 0; padding: 9px 4px; gap: 12px; }
+.cj-proc-list.checklist .cj-proc-row + .cj-proc-row { border-top: 1px solid var(--line-soft); }
+.cj-proc-list.checklist .cj-proc-thumb { width: 32px; height: 32px; }
+.cj-proc-list.checklist .cj-proc-name { font-weight: 500; font-size: 13.5px; }
+/* The spinner already signals activity; the text-pulse on top reads glitchy. */
+.cj-proc-list.checklist .cj-proc-row.active .cj-proc-status { animation: none; }
+.cj-proc-spin {
+  display: inline-block; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--chip); border-top-color: var(--ink-soft);
+  animation: cjspin 0.9s linear infinite; vertical-align: -2px;
+}
+@keyframes cjspin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .cj-proc-spin { animation: none; }
+}
 .cj-proc-row { display: flex; align-items: center; gap: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 12px 16px; flex-shrink: 0; }
-.cj-proc-row.done { opacity: 0.55; }
+/* Done rows stay at full strength: dimming them read as disabled. Waiting is
+   the only muted state; completion is a green check plus a green full bar. */
+.cj-proc-row.done .cj-proc-status { color: var(--color-text-success); }
 .cj-proc-row.waiting { opacity: 0.45; }
 .cj-proc-row.error { opacity: 0.85; border-color: var(--color-border-danger-surface); background: var(--color-background-danger-surface); }
 .cj-proc-thumb { width: 48px; height: 48px; flex-shrink: 0; border-radius: var(--radius-sm); object-fit: cover; }
@@ -881,12 +927,13 @@ body {
 .cj-proc-row.error .cj-proc-status { color: var(--color-text-danger); }
 .cj-proc-row.active .cj-proc-status { animation: cjpulse 1.4s ease-in-out infinite; }
 @keyframes cjpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-.cj-proc-track { width: 100%; height: 2px; background: var(--chip); position: relative; overflow: hidden; }
+/* Same pill language as the batch track above; smaller = child. */
+.cj-proc-track { width: 100%; height: 4px; border-radius: 999px; background: var(--chip); position: relative; overflow: hidden; }
 .cj-proc-fill { position: absolute; top: 0; left: 0; height: 100%; background: var(--ink); width: 0; }
 /* Paced to real gpt-image-2 latency (15-50s) so the bar doesn't stall at 92%
    twelve seconds in and read as frozen. */
 .cj-proc-row.active .cj-proc-fill { animation: cjfill 45s cubic-bezier(0.3, 0.6, 0.4, 0.9) forwards; }
-.cj-proc-row.done .cj-proc-fill { width: 100%; }
+.cj-proc-row.done .cj-proc-fill { width: 100%; background: var(--color-text-success-soft); }
 .cj-proc-row.waiting .cj-proc-fill { width: 6%; }
 @keyframes cjfill { 0% { width: 0; } 100% { width: 92%; } }
 
@@ -906,11 +953,35 @@ body {
   width: min(100cqi, 100cqb * var(--cj-ar, 1));
   aspect-ratio: var(--cj-ar, 1);
   max-width: 100%; max-height: 100%;
+  /* Ratio switches morph the frame instead of snapping; the cover-fit images
+     re-frame along with it. Mobile opts out implicitly: its auto sizing
+     never interpolates. */
+  transition: width 0.3s cubic-bezier(0.25, 0.8, 0.35, 1),
+              aspect-ratio 0.3s cubic-bezier(0.25, 0.8, 0.35, 1);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), 0 6px 24px rgba(0, 0, 0, 0.06);
   overflow: hidden; background: var(--panel); cursor: ew-resize;
   user-select: none; -webkit-user-select: none;
 }
+@media (prefers-reduced-motion: reduce) {
+  .cj-split { transition: none; }
+  .cj-xfade { transition: none; transform: none; }
+}
 .cj-after-img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; z-index: 1; pointer-events: none; }
+/* Ratio-switch (see CompareSlider): the overlay fades in inside the OLD box
+   pre-scaled by --xf-mi so its product matches the old render exactly, then
+   .settle sends it to scale(1) on the same clock and easing as the .cj-split
+   box morph — cover-tracking and the settle compose into one continuous
+   size glide. The base layer is never transformed. */
+.cj-xfade {
+  position: absolute; inset: 0; z-index: 3; opacity: 0; pointer-events: none;
+  transform: scale(var(--xf-mi, 1));
+  transition: opacity 0.12s ease,
+              transform 0.3s cubic-bezier(0.25, 0.8, 0.35, 1);
+}
+.cj-xfade.on { opacity: 1; }
+.cj-xfade.settle { transform: scale(1); }
+.cj-xfade-clip { position: absolute; inset: 0; overflow: hidden; }
+.cj-xfade-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .cj-before-wrap { position: absolute; inset: 0; overflow: hidden; z-index: 2; }
 .cj-before-wrap img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .cj-slider {
@@ -938,57 +1009,8 @@ body {
 
 .cj-stage-loading { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.35); }
 
-/* The loading stage holds a flat neutral base under the pac-man loader. */
+/* The loading stage holds a flat neutral base under the spinner. */
 .cj-stage.is-loading .cj-split { background: var(--line-soft); }
-
-/* Pac-man loader for the listing stage: a chomping disc eating dots that
-   drift in from the right. Colour adapted to the light stage (the reference
-   snippet used white). --size scales the whole thing. */
-.cj-pacman {
-  --color-1: var(--ink-soft);
-  --color-2: #0000;
-  --size: 1px;
-  width: calc(48 * var(--size));
-  height: calc(48 * var(--size));
-  position: relative;
-  border: calc(24 * var(--size)) solid var(--color-1);
-  border-radius: 50%;
-  box-sizing: border-box;
-  animation: cj-eat 1s linear infinite;
-}
-.cj-pacman::after,
-.cj-pacman::before {
-  content: '';
-  position: absolute;
-  left: calc(50 * var(--size));
-  top: 50%;
-  transform: translateY(-50%);
-  background: var(--color-1);
-  width: calc(15 * var(--size));
-  height: calc(15 * var(--size));
-  border-radius: 50%;
-  box-sizing: border-box;
-  opacity: 0;
-  animation: cj-move 2s linear infinite;
-}
-.cj-pacman::before { animation-delay: 1s; }
-@keyframes cj-eat {
-  0%, 49% { border-right-color: var(--color-1); }
-  50%, 100% { border-right-color: var(--color-2); }
-}
-@keyframes cj-move {
-  0% { left: calc(75 * var(--size)); opacity: 1; }
-  50% { left: 0; opacity: 1; }
-  52%, 100% { left: calc(-5 * var(--size)); opacity: 0; }
-}
-
-/* Filmstrip tile before its thumbnail has downloaded: flat gray base (from
-   .cj-thumb) with a tiny status word — visible immediately, no motion. */
-.cj-thumb-cooking {
-  display: flex; width: 100%; height: 100%;
-  align-items: center; justify-content: center;
-  font-size: 10px; color: var(--ink-soft); letter-spacing: 0.02em;
-}
 
 /* ── dimension annotation overlay ── */
 /* Clips overlays to the after side of the compare divider (left inset follows
@@ -996,16 +1018,16 @@ body {
    overlay's interactive children opt back in individually. */
 .cj-overlay-clip { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
 .cj-dim-layer { position: absolute; inset: 0; z-index: 7; }
-.cj-dim-svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.cj-dim-svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; color: var(--gray-500); }
 .cj-dim-handle {
   position: absolute; width: 15px; height: 15px; border-radius: 50%;
-  transform: translate(-50%, -50%); border: 1.5px solid #5d5e66; background: #fff;
-  background-image: radial-gradient(circle at center, #5d5e66 0 2.5px, transparent 3px);
+  transform: translate(-50%, -50%); border: 1.5px solid var(--gray-500); background: #fff;
+  background-image: radial-gradient(circle at center, var(--gray-500) 0 2.5px, transparent 3px);
   z-index: 2; pointer-events: none;   /* interaction handled by .cj-dim-pt */
 }
 .cj-dim-label {
   position: absolute; transform: translate(-50%, -50%); white-space: nowrap;
-  font-family: var(--sans); font-size: 18px; line-height: 1; color: #5d5e66;
+  font-family: var(--sans); font-size: 18px; line-height: 1; color: var(--gray-500);
   cursor: text; z-index: 3; user-select: none;
 }
 .cj-dim-input {
@@ -1057,13 +1079,13 @@ body {
 .cj-dim-pt:active { cursor: grabbing; }
 .cj-dim-trash {
   position: absolute; transform: translate(-50%, -50%); width: 28px; height: 28px;
-  border-radius: 50%; background: #fff; border: 1.5px solid #d64545; color: #d64545;
+  border-radius: 50%; background: #fff; border: 1.5px solid var(--red-400); color: var(--red-400);
   display: flex; align-items: center; justify-content: center; padding: 0;
   cursor: pointer; z-index: 4; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   pointer-events: auto;
 }
 .cj-dim-trash .ms { font-size: 16px; }
-.cj-dim-trash:hover { background: #d64545; color: #fff; }
+.cj-dim-trash:hover { background: var(--red-400); color: #fff; }
 .cj-spin {
   width: 26px; height: 26px; border: 2px solid var(--line); border-top-color: var(--ink);
   border-radius: 50%; animation: cjspin 0.8s linear infinite;
@@ -1110,9 +1132,13 @@ body {
 }
 .cj-pend.dim { opacity: 0.5; }
 .cj-pend.spin::before { content: ""; position: absolute; inset: 0; background: rgba(255, 255, 255, 0.5); }
+/* Ring track must be a SOLID light gray (--chip): the alpha --line track
+   vanishes on the white veil, leaving the dark top arc floating like a
+   broken frame over the photo. Same palette as .cj-proc-spin. */
 .cj-pend.spin::after {
-  content: ""; position: absolute; top: 50%; left: 50%; width: 18px; height: 18px;
-  margin: -10px 0 0 -10px; border: 2px solid var(--line); border-top-color: var(--ink);
+  content: ""; position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
+  margin: -10px 0 0 -10px; box-sizing: border-box;
+  border: 2px solid var(--chip); border-top-color: var(--ink-soft);
   border-radius: 50%; animation: cjspin 0.8s linear infinite;
 }
 /* Failed upload tile: photo stays in place, click retries it. */
@@ -1130,11 +1156,13 @@ body {
   transition: transform var(--default-transition-duration) var(--default-transition-timing-function);
 }
 .cj-fail:hover .ms { transform: rotate(90deg); }
+/* Same solid-track ring as .cj-pend.spin::after (alpha tracks vanish on the
+   white veil). */
 .cj-fail.busy::after {
-  content: ""; position: absolute; top: 50%; left: 50%; width: 18px; height: 18px;
-  margin: -10px 0 0 -10px; border: 2px solid var(--color-border);
-  border-top-color: var(--color-text); border-radius: 50%;
-  animation: cjspin 0.8s linear infinite;
+  content: ""; position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
+  margin: -10px 0 0 -10px; box-sizing: border-box;
+  border: 2px solid var(--chip); border-top-color: var(--ink-soft);
+  border-radius: 50%; animation: cjspin 0.8s linear infinite;
 }
 
 .cj-addtile {
@@ -1254,6 +1282,11 @@ body {
   transition: border-color var(--default-transition-duration) var(--default-transition-timing-function);
 }
 .cj-desc-input:hover { border-color: var(--input-outline-border-color-hover); }
+/* Subtitle textarea: fixed three-line box, scrolls inside beyond that. */
+.cj-desc-area {
+  resize: none; line-height: 20px; height: calc(20px * 3 + 8px * 2 + 2px);
+  overflow-y: auto; display: block;
+}
 .cj-desc-input:focus { border-color: var(--color-ring); }
 .cj-desc-input::placeholder { color: var(--color-text-tertiary); }
 .cj-apply {
@@ -1268,14 +1301,44 @@ body {
 /* ── Modals — platform-console dialog design (Figma auto-recharge spec):
       white card, 16px radius, no separators, 18px semibold title, 14px/24px
       body, 32px pill buttons right-aligned. Grid dialogs keep a wider card. */
+/* Modals enter with the library detail's motion language at a lighter
+   tempo: scrim fades, panel rises and settles. Exit (.out, driven by
+   ModalShell which keeps the DOM mounted for it) mirrors the entrance. */
 .cj-modal-scrim {
   position: fixed; inset: 0; z-index: 100; display: flex; align-items: center;
   justify-content: center; padding: 2rem;
   background: var(--modal-backdrop-background);
+  animation: cj-scrim-in 0.45s var(--default-transition-timing-function);
+}
+@keyframes cj-scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.cj-modal-scrim.out {
+  animation: cj-scrim-out 0.36s var(--default-transition-timing-function) forwards;
+}
+@keyframes cj-scrim-out {
+  to { opacity: 0; }
+}
+.cj-modal-scrim.out .cj-modal {
+  animation: cj-modal-out 0.36s var(--default-transition-timing-function) forwards;
+}
+@keyframes cj-modal-out {
+  to { opacity: 0; transform: translateY(10px) scale(0.99); }
+}
+@keyframes cj-modal-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cj-modal-scrim, .cj-modal,
+  .cj-modal-scrim.out, .cj-modal-scrim.out .cj-modal { animation: none; }
 }
 .cj-modal {
+  animation: cj-modal-in 0.45s cubic-bezier(0.16, 1, 0.3, 1);
   background: var(--color-surface-elevated); width: 100%; max-width: 896px;
-  max-height: 90vh; border-radius: var(--radius-2xl);
+  /* Radius follows the platform dialog spec (12px), not the marketing 16px. */
+  max-height: 90vh; border-radius: var(--radius-xl);
   box-shadow: var(--shadow); display: flex; flex-direction: column;
   border: none; overflow: hidden;
   font-family: var(--font-sans);
@@ -1291,18 +1354,36 @@ body {
 .cj-modal-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 20px; }
 .cj-modal-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 @media (max-width: 760px) { .cj-modal-grid { grid-template-columns: repeat(2, 1fr); } }
-.cj-ex-item { position: relative; aspect-ratio: 1; background: var(--chip); border-radius: 2px; overflow: hidden; cursor: pointer; border: 1px solid var(--line); padding: 0; transition: border-color 0.15s; }
+/* Tiles speak the same select/hover language as .cj-ratio-card and .cj-thumb:
+   radius-md, 1px --color-border at rest, border-strong on hover, and a
+   gray-900 outline (border + inset shadow, so the cover-fit thumbnail never
+   rescales) when selected. */
+.cj-ex-item {
+  position: relative; aspect-ratio: 1; background: var(--chip);
+  border-radius: var(--radius-md); overflow: hidden; cursor: pointer;
+  border: 1px solid var(--color-border); padding: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
 .cj-ex-item img { width: 100%; height: 100%; object-fit: cover; opacity: 0.7; transition: opacity 0.15s; }
-.cj-ex-item:hover { border-color: var(--ink); }
+.cj-ex-item:hover { border-color: var(--color-border-strong); }
 .cj-ex-item:hover img { opacity: 1; }
-.cj-ex-item.sel { border: 2px solid var(--ink); }
+.cj-ex-item.sel {
+  border-color: var(--color-gray-900);
+  box-shadow: inset 0 0 0 1px var(--color-gray-900);
+}
 .cj-ex-item.sel img { opacity: 1; }
+/* Unselected: a plain pale disc (no glyph). Selected: ink disc, white check. */
 .cj-ex-badge {
   position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center; font-size: 15px;
-  background: rgba(248, 249, 250, 0.7); color: #7e7576;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.85); border: 1px solid var(--color-border);
+  color: transparent;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.cj-ex-item.sel .cj-ex-badge { background: var(--ink); color: #fff; }
+.cj-ex-item.sel .cj-ex-badge {
+  background: var(--color-gray-900); border-color: var(--color-gray-900);
+  color: var(--color-white);
+}
 .cj-modal-foot { padding: 0 20px 20px; display: flex; justify-content: flex-end; gap: 8px; }
 .cj-modal-cancel {
   height: 32px; padding: 0 14px; border: none; border-radius: var(--radius-lg);
@@ -1348,7 +1429,10 @@ body {
 .cj-lib-img {
   position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: contain; padding: 8%; box-sizing: border-box;
+  /* Thumbs fade in as they decode instead of popping into the blank grid. */
+  opacity: 0; transition: opacity 0.4s var(--transition-ease-basic);
 }
+.cj-lib-img.loaded { opacity: 1; }
 .cj-lib-actions { position: absolute; inset: 0; opacity: 0; transition: opacity var(--default-transition-duration) var(--default-transition-timing-function); }
 .cj-lib-cell:hover .cj-lib-actions { opacity: 1; }
 .cj-lib-iconbtn {
@@ -1387,40 +1471,84 @@ body {
    right); text column ≤600px, vertically centred. */
 .cj-lib-detail {
   position: fixed; inset: 0; z-index: 120; background: var(--color-surface);
-  display: flex; align-items: stretch; gap: 80px;
+  display: flex; align-items: stretch;
   padding: 40px 40px 60px;
-  animation: cj-detail-in 0.25s var(--default-transition-timing-function);
+  /* No entrance animation on the ROOT: it only plays on first open, which
+     made opening (root + body ensembles compounded) differ from arrow-paging
+     (body only). With the entrance owned entirely by the keyed body, opening
+     and paging play literally the same animation. The exit (.out) stays. */
 }
 @keyframes cj-detail-in {
   from { opacity: 0; transform: scale(0.98); }
   to   { opacity: 1; transform: none; }
 }
-.cj-lib-detail-stage { flex: 1 1 auto; min-width: 0; }
-/* Paging: the incoming image stays hidden until loaded, then fade-slides in
-   from the arrow direction (--page-from, ±12px; 0 on first open = plain fade).
-   Meta text swaps instantly — only the image moves. */
+/* Exit mirrors the entrance (fade + slight sink); the unmount waits for it,
+   so closing no longer reads as a flicker. */
+.cj-lib-detail.out {
+  animation: cj-detail-out 480ms var(--default-transition-timing-function) forwards;
+}
+@keyframes cj-detail-out {
+  to { opacity: 0; transform: translateY(6px) scale(0.99); }
+}
+/* The column split is LOCKED: flex-basis 0 (not auto) so the stage width
+   never derives from the image's intrinsic pixels — with basis auto a
+   2133px-wide 4:3 export claimed more column than a 1600px 1:1 and the whole
+   layout shifted per photo. The image sizes naturally inside the fixed
+   stage: width-limited ratios fill the stage width and vary in HEIGHT;
+   taller-than-stage ratios cap at stage height. Right-anchored so it always
+   hugs the text column. */
+/* Keyed per item (see the page component): remounts on arrow-paging so a
+   page turn replays the same envelope animation as the first open. */
+.cj-lib-detail-body {
+  flex: 1; min-width: 0; display: flex; align-items: stretch; gap: 80px;
+  animation: cj-detail-in 0.6s var(--default-transition-timing-function);
+}
+.cj-lib-detail-stage {
+  flex: 1 1 0; min-width: 0;
+  display: flex; align-items: center; justify-content: flex-end;
+}
+/* The incoming image stays hidden until loaded, then rises from below —
+   first open and arrow-paging share the exact same motion and speed. The
+   meta column floats up in sync (below). */
 .cj-lib-detail-stage img {
-  width: 100%; height: 100%; object-fit: contain;
-  object-position: right center;
+  max-width: 100%; max-height: 100%;
+  width: auto; height: auto;
   opacity: 0;
 }
 .cj-lib-detail-stage img.in {
   opacity: 1;
-  animation: cj-page-in 160ms cubic-bezier(0, 0, 0.2, 1);
+  animation: cj-page-in 450ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes cj-page-in {
-  from { opacity: 0; transform: translateX(var(--page-from, 0px)); }
+  from { opacity: 0; transform: translateY(16px); }
   to   { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .cj-lib-detail { animation: none; }
+  .cj-lib-detail-body { animation: none; }
+  .cj-lib-detail.out { animation: none; }
   .cj-lib-detail-stage img.in { animation: none; }
-  /* Static disc (mouth closed, dots hidden) still marks the loading state. */
-  .cj-pacman, .cj-pacman::before, .cj-pacman::after { animation: none; }
+  .cj-lib-detail-side { opacity: 1; }
+  .cj-lib-detail-side.in { animation: none; }
+  /* The static ring still marks the loading state. */
+  .cj-spin { animation: none; }
+  .cj-pend.spin::after, .cj-fail.busy::after { animation: none; }
+  .cj-lib-img { transition: none; }
 }
 .cj-lib-detail-side {
-  flex: 1 1 600px; max-width: 600px; margin: auto 0; padding-right: 40px;
+  /* Fixed column: the meta text sits in the same place for every photo.
+     min() keeps the stage usable on narrow windows. */
+  flex: 0 0 min(600px, 45%); margin: auto 0; padding-right: 40px;
   display: flex; flex-direction: column; gap: 16px;
+  /* Hidden until the incoming image decodes, then floats up 40ms behind it. */
+  opacity: 0;
+}
+.cj-lib-detail-side.in {
+  animation: cj-side-in 600ms cubic-bezier(0.16, 1, 0.3, 1) 60ms both;
+}
+@keyframes cj-side-in {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: none; }
 }
 .cj-lib-detail-meta {
   display: flex; flex-wrap: wrap; column-gap: 16px; row-gap: 12px;

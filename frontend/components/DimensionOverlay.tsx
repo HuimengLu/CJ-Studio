@@ -19,7 +19,9 @@ export type Pt = { x: number; y: number };
 export type Dimension = { start: Pt; end: Pt; value: string };
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-const STROKE = "#5d5e66";
+/* Resolves to var(--gray-500) via `color` on .cj-dim-svg — SVG presentation
+   attributes can't hold var() directly. */
+const STROKE = "currentColor";
 
 type Drag = {
   i: number;
@@ -294,7 +296,7 @@ export default function DimensionOverlay({
             ref={inputRef}
             className="cj-dim-input"
             style={{ left: g.label.x, top: g.label.y }}
-            placeholder="Enter the Dimension"
+            placeholder="Enter the dimension"
             value={isDraft ? dValue : editValue}
             onPointerDown={(e) => e.stopPropagation()}
             onChange={(e) => (isDraft ? setDValue(e.target.value) : setEditValue(e.target.value))}

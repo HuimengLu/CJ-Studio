@@ -1,9 +1,9 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import CompareSlider from "@/components/CompareSlider";
 import DimensionOverlay from "@/components/DimensionOverlay";
-import { ArrowClockwiseIcon, CameraPlusIcon, CheckCircleIcon, CircleIcon } from "@/components/icons";
+import { ArrowClockwiseIcon, CameraPlusIcon, CheckIcon } from "@/components/icons";
 import OptionCard from "@/components/OptionCard";
 import {
   RATIOS, RATIO_AR, SESSION_EXPIRED, entryKey, imgUrl, stageW, thumbUrl, useListing,
@@ -24,8 +24,8 @@ import {
    so batches keep running and results survive tab switches. This component
    is the view: DOM refs and hover/drag visuals only. */
 
-/* Filmstrip thumb: flat gray with a tiny "cooking…" until its image has
-   actually downloaded (tracked via an off-DOM preload of the same URL). */
+/* Filmstrip thumb: stays a flat gray tile until its image has actually
+   downloaded (tracked via an off-DOM preload of the same URL). */
 function ThumbButton({ p, active, onClick }: {
   p: Photo; active: boolean; onClick: () => void;
 }) {
@@ -44,19 +44,47 @@ function ThumbButton({ p, active, onClick }: {
       style={loaded ? { backgroundImage: `url(${url})` } : undefined}
       onClick={onClick}
       aria-label={p.name}
-    >
-      {!loaded && <span className="cj-thumb-cooking">cooking…</span>}
-    </button>
+    />
+  );
+}
+
+/* Modal wrapper that stays mounted through its exit animation: flipping
+   `open` false plays the scrim + panel fade-down (the library detail's
+   motion language at a lighter tempo) before unmounting. Prop changes are
+   adapted during render (store-previous-props pattern); reduced motion
+   unmounts on the next tick instead. */
+function ModalShell({ open, onClose, children }: {
+  open: boolean; onClose: () => void; children: ReactNode;
+}) {
+  const [render, setRender] = useState(open);
+  const [closing, setClosing] = useState(false);
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) { setRender(true); setClosing(false); }
+    else if (render) setClosing(true);
+  }
+  useEffect(() => {
+    if (!closing) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const t = setTimeout(() => { setRender(false); setClosing(false); }, reduce ? 0 : 380);
+    return () => clearTimeout(t);
+  }, [closing]);
+  if (!render) return null;
+  return (
+    <div className={`cj-modal-scrim${closing ? " out" : ""}`} onClick={onClose}>
+      {children}
+    </div>
   );
 }
 
 function StepsStrip({ current = 0 }: { current?: number }) {
-  const steps = ["Upload", "Optimize", "Export"];
+  const steps = ["Upload", "Enhance", "Export"];
   return (
     <div className="cj-strip">
       {steps.map((label, i) => (
         <span key={label} style={{ display: "contents" }}>
-          {i > 0 && <span className="cj-dash">—</span>}
+          {i > 0 && <span className="cj-dash" aria-hidden="true" />}
           <div className={`cj-step${current === i + 1 ? " active" : ""}`}>
             <span className="cj-num">{i + 1}</span>
             <span className="cj-steplbl">{label}</span>
@@ -69,10 +97,10 @@ function StepsStrip({ current = 0 }: { current?: number }) {
 
 export default function ListingPage() {
   const {
-    phase, rows, photos, active, warn, animate, imgLoading, pending,
+    phase, rows, photos, active, warn, animate, imgLoading, quietLoad, pending,
     confirmDelete, exportOpen, exportSel, exporting, dimMode, coverBusy,
     failed, savedNote, newCovers, undoDelete, photo, donePct, sliderCtl,
-    setPhotos, setActive, setWarn, setAnimate, setImgLoading, setDimMode,
+    setPhotos, setActive, setWarn, setAnimate, setImgLoading, setQuietLoad, setDimMode,
     setConfirmDelete, setExportOpen, setExportSel,
     startBatch, cancelBatch, addMore, retryFailed, toggleCover,
     deletePhoto, undoRemove, exportSelected, exportSingle, mutatePhoto,
@@ -104,7 +132,7 @@ export default function ListingPage() {
         >
           <div className="cj-drop-icon"><CameraPlusIcon size={40} /></div>
           <div className="cj-drop-title">Click or drop files</div>
-          <div className="cj-drop-hint">JPG · PNG · WEBP / MAX 200MB</div>
+          <div className="cj-drop-hint">JPG · PNG · WEBP · max 200 MB</div>
           <input
             ref={fileRef} type="file" multiple hidden
             accept="image/jpeg,image/png,image/webp"
@@ -135,32 +163,67 @@ export default function ListingPage() {
                 <span className="cj-proc-head-label">Batch Progress</span>
                 <span className="cj-proc-head-pct">{donePct}%</span>
               </div>
+              {/* One estimate for the whole batch — photos run 3 in parallel,
+                  so ≤3 photos take about one generation (~15s) total, larger
+                  batches one wave per started group of 3. Per-row text stays
+                  terse to avoid repeating this on every line. */}
+              <div className="cj-proc-head-sub">
+                Takes about {15 * Math.ceil(rows.length / 3)} sec
+              </div>
               <div className="cj-proc-head-track">
                 <div className="cj-proc-head-fill" style={{ width: `${donePct}%` }} />
               </div>
             </div>
           )}
-          <div className="cj-proc-list">
+          {/* Multi-photo batches: progress lives ONLY in the batch bar above;
+              rows are a status checklist (spinner / green check / Waiting) —
+              parallel items animate near-identically, so per-row bars were
+              four moving elements telling one story. A single photo has no
+              batch bar, so it keeps its own bar as the sole indicator. */}
+          <div className={`cj-proc-list${rows.length > 1 ? " checklist" : ""}`}>
             {rows.map((r, i) => (
               <div key={i} className={`cj-proc-row ${r.state}`}>
                 {r.thumb
                   ? /* eslint-disable-next-line @next/next/no-img-element */
                     <img className="cj-proc-thumb" src={r.thumb} alt="" />
                   : <div className="cj-proc-thumb" style={{ background: "var(--line-soft)" }} />}
-                <div className="cj-proc-body">
-                  <div className="cj-proc-top">
+                {rows.length > 1 ? (
+                  <>
                     <span className="cj-proc-name">{r.name}</span>
-                    <span className="cj-proc-status">
-                      {{ waiting: "Waiting…", active: "Optimizing… usually 20–40s", done: "Done", error: "Failed" }[r.state]}
+                    <span
+                      className="cj-proc-status"
+                      aria-label={{ waiting: undefined, active: "Enhancing photo", done: "Done", error: undefined }[r.state]}
+                    >
+                      {{
+                        waiting: "Waiting…",
+                        active: <span className="cj-proc-spin" />,
+                        done: <CheckIcon size={15} />, error: "Failed",
+                      }[r.state]}
                     </span>
+                  </>
+                ) : (
+                  <div className="cj-proc-body">
+                    <div className="cj-proc-top">
+                      <span className="cj-proc-name">{r.name}</span>
+                      <span
+                        className="cj-proc-status"
+                        aria-label={r.state === "done" ? "Done" : undefined}
+                      >
+                        {{
+                          waiting: "Waiting…",
+                          active: "Enhancing photo… about 15 seconds",
+                          done: <CheckIcon size={15} />, error: "Failed",
+                        }[r.state]}
+                      </span>
+                    </div>
+                    <div className="cj-proc-track"><div className="cj-proc-fill" /></div>
                   </div>
-                  <div className="cj-proc-track"><div className="cj-proc-fill" /></div>
-                </div>
+                )}
               </div>
             ))}
           </div>
           <button className="cj-proc-cancel" onClick={cancelBatch}>
-            Cancel
+            Cancel Processing
           </button>
         </div>
         <StepsStrip current={2} />
@@ -190,6 +253,9 @@ export default function ListingPage() {
             beforeSrc={imgUrl(photo, "before", stageW())}
             afterSrc={imgUrl(photo, "after", stageW())}
             aspectRatio={RATIO_AR[photo.ratio]}
+            /* Mirrors backend pipeline._TESTING2_ZOOM: 1:1 composes 1.25x,
+               4:5 composes 1.2x. Keep the two in sync. */
+            contentZoom={(ar) => (ar === 1 ? 1.25 : ar < 1 ? 1.2 : 1)}
             animate={animate}
             restX={0}
             onAfterLoaded={() => { setAnimate(false); setImgLoading(false); }}
@@ -211,9 +277,11 @@ export default function ListingPage() {
               )
             }
           />
-          {/* Single loading signal: the pac-man loader over the flat
-              is-loading base (which also holds the finished frame's size). */}
-          {imgLoading && <div className="cj-stage-loading"><div className="cj-pacman" /></div>}
+          {/* Single loading signal: the spinner over the flat is-loading
+              base (which also holds the finished frame's size). Quiet loads
+              (ratio switches, prefetched) skip the veil so the frame morph
+              runs unobscured. */}
+          {imgLoading && !quietLoad && <div className="cj-stage-loading"><div className="cj-spin" /></div>}
         </div>
 
         {/* Always present — the "+" tile is the only way to add more photos. */}
@@ -225,13 +293,13 @@ export default function ListingPage() {
                   <ThumbButton
                     p={p}
                     active={i === active}
-                    onClick={() => { if (i !== active) { setActive(i); setImgLoading(true); setDimMode(false); setAnimate(true); } }}
+                    onClick={() => { if (i !== active) { setActive(i); setQuietLoad(false); setImgLoading(true); setDimMode(false); setAnimate(true); } }}
                   />
                   <button className="cj-delbtn" onClick={() => setConfirmDelete(i)} aria-label={`Delete ${p.name}`}>
                     ✕
                   </button>
                   {p.variant === "cover" && newCovers.has(p.id) && (
-                    <span className="cj-newdot" title="New cover — click to view" />
+                    <span className="cj-newdot" title="New cover. Click to view" />
                   )}
                 </div>
                 {/* A cover being generated shows up immediately as a loading
@@ -261,7 +329,7 @@ export default function ListingPage() {
                 key={`fail-${i}`}
                 className={`cj-fail${f.busy ? " busy" : ""}`}
                 style={f.thumb ? { backgroundImage: `url(${f.thumb})` } : undefined}
-                title={`${f.name} failed — click to retry${f.warn ? `\n${f.warn}` : ""}`}
+                title={`${f.name} failed. Click to retry${f.warn ? `\n${f.warn}` : ""}`}
                 onClick={() => retryFailed(i)}
               >
                 {!f.busy && <ArrowClockwiseIcon size={22} />}
@@ -305,7 +373,7 @@ export default function ListingPage() {
                 else { setDimMode(true); sliderCtl.current?.toLeft(); }
               }}
             >
-              {dimMode ? "Placing points — Esc to exit" : "Add Dimensions"}
+              {dimMode ? "Placing Points · Esc to Exit" : "Add Dimensions"}
             </button>
             <div className="cj-field">
               <button
@@ -318,10 +386,10 @@ export default function ListingPage() {
               </button>
               <p className="cj-hint" role="status">
                 {busy
-                  ? "Hang tight! Your cover will appear below in about 20–40 seconds."
+                  ? "Hang tight! Your cover will appear below in about 20 sec."
                   : coverOn
                     ? "Removing a cover cannot be undone."
-                    : "Adding a cover usually takes 20–40 seconds. Use only for featured items."}
+                    : "Takes about 20 sec. Best for featured items."}
               </p>
             </div>
           </div>
@@ -335,15 +403,14 @@ export default function ListingPage() {
               Export
             </button>
           ) : (
-            <button className="cj-btn-primary" onClick={exportSingle}>Export image</button>
+            <button className="cj-btn-primary" onClick={exportSingle}>Export Image</button>
           )}
           {savedNote && <p className="cj-saved">✓ Saved to Library</p>}
         </div>
       </aside>
 
-      {exportOpen && (
-        <div className="cj-modal-scrim" onClick={() => setExportOpen(false)}>
-          <div className="cj-modal" onClick={(e) => e.stopPropagation()}>
+      <ModalShell open={exportOpen} onClose={() => setExportOpen(false)}>
+        <div className="cj-modal" onClick={(e) => e.stopPropagation()}>
             <div className="cj-modal-head">
               <h2>Export Selection</h2>
             </div>
@@ -364,7 +431,7 @@ export default function ListingPage() {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={thumbUrl(p, 320)} alt={p.name} />
                     <span className="cj-ex-badge">
-                      {exportSel.has(i) ? <CheckCircleIcon size={15} /> : <CircleIcon size={15} />}
+                      {exportSel.has(i) && <CheckIcon size={13} />}
                     </span>
                     {/* what this tile actually contains — batch exports pick the right version */}
                     <span className="cj-ex-flags">
@@ -385,14 +452,13 @@ export default function ListingPage() {
                 {exporting ? "Exporting…" : `Export Selected (${exportSel.size})`}
               </button>
             </div>
-          </div>
         </div>
-      )}
+      </ModalShell>
 
       {confirmDelete !== null && photos[confirmDelete] && (
         <div className="cj-modal-scrim" onClick={() => setConfirmDelete(null)}>
           <div className="cj-modal small" onClick={(e) => e.stopPropagation()}>
-            <div className="cj-modal-head"><h2>Delete photo</h2></div>
+            <div className="cj-modal-head"><h2>Delete Photo</h2></div>
             <div className="cj-modal-text">
               Remove <b>{photos[confirmDelete].name}</b> from this batch? Its edits will be lost.
             </div>

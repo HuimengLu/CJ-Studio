@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CompareSlider from "@/components/CompareSlider";
 import DimensionOverlay, { type Dimension } from "@/components/DimensionOverlay";
-import { ArrowClockwiseIcon, CameraPlusIcon, CheckCircleIcon, CircleIcon } from "@/components/icons";
+import { ArrowClockwiseIcon, CameraPlusIcon, CheckIcon } from "@/components/icons";
 import OptionCard from "@/components/OptionCard";
+import { fillCurve } from "../listing-state";
 
 type Ratio = "1:1" | "4:3" | "4:5";
 const RATIOS: { id: Ratio; label: string }[] = [
@@ -29,6 +30,7 @@ type ProcRow = {
   thumb: string | null;   // object URL
   state: "waiting" | "active" | "done" | "error";
   warn?: string;
+  activeAt?: number;      // when processing started — drives the live batch %
 };
 
 /* A failed upload kept in the filmstrip so it can be retried in place —
@@ -83,9 +85,9 @@ function StepsStrip() {
   return (
     <div className="cj-strip">
       <div className="cj-step"><span className="cj-num">1</span><span className="cj-steplbl">Upload</span></div>
-      <span className="cj-dash">—</span>
-      <div className="cj-step"><span className="cj-num">2</span><span className="cj-steplbl">Algorithm Optimize</span></div>
-      <span className="cj-dash">—</span>
+      <span className="cj-dash" aria-hidden="true" />
+      <div className="cj-step"><span className="cj-num">2</span><span className="cj-steplbl">Algorithm Enhance</span></div>
+      <span className="cj-dash" aria-hidden="true" />
       <div className="cj-step"><span className="cj-num">3</span><span className="cj-steplbl">Export</span></div>
     </div>
   );
@@ -162,7 +164,7 @@ export default function LegacyListingPage() {
     const warns: string[] = [];
     for (let i = 0; i < files.length; i++) {
       if (cancelled.current) return;
-      setRows((r) => r.map((row, j) => (j === i ? { ...row, state: "active" } : row)));
+      setRows((r) => r.map((row, j) => (j === i ? { ...row, state: "active", activeAt: Date.now() } : row)));
       const out = await processFile(files[i]);
       if (cancelled.current) return;
       if (out.id) {
@@ -266,10 +268,24 @@ export default function LegacyListingPage() {
   }, [photo]);
 
   const multi = photos.length > 1;
+  /* Live batch % — see listing-state.donePct: equal-weight average of what
+     each item bar currently shows, sampled on a ticking clock. */
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (phase !== "processing") return;
+    const id = setInterval(() => setNow(Date.now()), 300);
+    return () => clearInterval(id);
+  }, [phase]);
   const donePct = useMemo(() => {
-    const done = rows.filter((r) => r.state === "done" || r.state === "error").length;
-    return rows.length ? Math.round((done / rows.length) * 100) : 0;
-  }, [rows]);
+    if (!rows.length) return 0;
+    const sum = rows.reduce((acc, r) => {
+      if (r.state === "done" || r.state === "error") return acc + 1;
+      if (r.state === "active" && r.activeAt) return acc + fillCurve((now - r.activeAt) / 45000);
+      return acc + 0.06;
+    }, 0);
+    const finished = rows.every((r) => r.state === "done" || r.state === "error");
+    return Math.min(Math.round((sum / rows.length) * 100), finished ? 100 : 99);
+  }, [rows, now]);
 
   /* ═══ home ═══ */
   if (phase === "home") {
@@ -286,7 +302,7 @@ export default function LegacyListingPage() {
         >
           <div className="cj-drop-icon"><CameraPlusIcon size={40} /></div>
           <div className="cj-drop-title">Click or drop files</div>
-          <div className="cj-drop-hint">JPG · PNG · WEBP / MAX 200MB</div>
+          <div className="cj-drop-hint">JPG · PNG · WEBP · max 200 MB</div>
           <input
             ref={fileRef} type="file" multiple hidden
             accept="image/jpeg,image/png,image/webp"
@@ -315,27 +331,43 @@ export default function LegacyListingPage() {
               </div>
             </div>
           )}
-          <div className="cj-proc-list">
+          <div className={`cj-proc-list${rows.length > 1 ? " checklist" : ""}`}>
             {rows.map((r, i) => (
               <div key={i} className={`cj-proc-row ${r.state}`}>
                 {r.thumb
                   ? /* eslint-disable-next-line @next/next/no-img-element */
                     <img className="cj-proc-thumb" src={r.thumb} alt="" />
                   : <div className="cj-proc-thumb" style={{ background: "var(--line-soft)" }} />}
-                <div className="cj-proc-body">
-                  <div className="cj-proc-top">
+                {rows.length > 1 ? (
+                  <>
                     <span className="cj-proc-name">{r.name}</span>
-                    <span className="cj-proc-status">
-                      {{ waiting: "Waiting…", active: "Optimizing…", done: "Done", error: "Failed" }[r.state]}
+                    <span
+                      className="cj-proc-status"
+                      aria-label={{ waiting: undefined, active: "Enhancing photo", done: "Done", error: undefined }[r.state]}
+                    >
+                      {{
+                        waiting: "Waiting…",
+                        active: <span className="cj-proc-spin" />,
+                        done: <CheckIcon size={15} />, error: "Failed",
+                      }[r.state]}
                     </span>
+                  </>
+                ) : (
+                  <div className="cj-proc-body">
+                    <div className="cj-proc-top">
+                      <span className="cj-proc-name">{r.name}</span>
+                      <span className="cj-proc-status">
+                        {{ waiting: "Waiting…", active: "Enhancing photo…", done: <CheckIcon size={15} />, error: "Failed" }[r.state]}
+                      </span>
+                    </div>
+                    <div className="cj-proc-track"><div className="cj-proc-fill" /></div>
                   </div>
-                  <div className="cj-proc-track"><div className="cj-proc-fill" /></div>
-                </div>
+                )}
               </div>
             ))}
           </div>
           <button className="cj-proc-cancel" onClick={() => { cancelled.current = true; setPhase("home"); }}>
-            Cancel
+            Cancel Processing
           </button>
         </div>
         <StepsStrip />
@@ -408,7 +440,7 @@ export default function LegacyListingPage() {
                 key={`fail-${i}`}
                 className={`cj-fail${f.busy ? " busy" : ""}`}
                 style={f.thumb ? { backgroundImage: `url(${f.thumb})` } : undefined}
-                title={`${f.name} failed — click to retry${f.warn ? `\n${f.warn}` : ""}`}
+                title={`${f.name} failed. Click to retry${f.warn ? `\n${f.warn}` : ""}`}
                 onClick={() => retryFailed(i)}
               >
                 {!f.busy && <ArrowClockwiseIcon size={22} />}
@@ -464,7 +496,7 @@ export default function LegacyListingPage() {
                 else { setDimMode(true); sliderCtl.current?.toLeft(); }
               }}
             >
-              {dimMode ? "Placing points — Esc to exit" : "Add Dimensions"}
+              {dimMode ? "Placing Points · Esc to Exit" : "Add Dimensions"}
             </button>
           </div>
         </div>
@@ -477,7 +509,7 @@ export default function LegacyListingPage() {
               Export
             </button>
           ) : (
-            <button className="cj-btn-primary" onClick={exportSingle}>Export image</button>
+            <button className="cj-btn-primary" onClick={exportSingle}>Export Image</button>
           )}
         </div>
       </aside>
@@ -506,7 +538,7 @@ export default function LegacyListingPage() {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={`/api/photos/${p.id}/thumb?s=320`} alt={p.name} />
                     <span className="cj-ex-badge">
-                      {exportSel.has(i) ? <CheckCircleIcon size={15} /> : <CircleIcon size={15} />}
+                      {exportSel.has(i) && <CheckIcon size={13} />}
                     </span>
                     {p.dimensions.length > 0 && (
                       <span className="cj-ex-flags">
@@ -533,7 +565,7 @@ export default function LegacyListingPage() {
       {confirmDelete !== null && photos[confirmDelete] && (
         <div className="cj-modal-scrim" onClick={() => setConfirmDelete(null)}>
           <div className="cj-modal small" onClick={(e) => e.stopPropagation()}>
-            <div className="cj-modal-head"><h2>Delete photo</h2></div>
+            <div className="cj-modal-head"><h2>Delete Photo</h2></div>
             <div className="cj-modal-text">
               Remove <b>{photos[confirmDelete].name}</b> from this batch? Its edits will be lost.
             </div>
