@@ -56,19 +56,26 @@ def _png_buf(pil_img: Image.Image, name: str) -> io.BytesIO:
     buf.name = name
     return buf
 
-# The fixed prompt: remove background → solid white + front-right studio shadow,
-# keep the product's real texture/detail (no cut-out look).
+# The fixed prompt: remove background → solid white + front-right studio
+# shadow. Geometry/texture/condition stay untouched; lighting and tone may
+# adapt to the white environment but the product's color identity must not
+# drift (gray/muted/warm/cool casts were the failure mode this guards).
 PROMPT = (
     "Remove the image background and replace it with a solid white backdrop. "
     "Preserve the product exactly as captured without changing its geometry, "
-    "color, texture, or perspective. Add one soft natural floor shadow that "
-    "originates from the object's contact points and extends diagonally toward "
-    "the back-left of the image, matching illumination from the front-right. "
-    "The shadow should be subtle, short, and softly blurred, fading naturally "
-    "with distance. Do not place the shadow directly underneath the object or "
-    "evenly around it. Scale the product so that its longest dimension occupies "
-    "approximately 75% of the frame. Maintain consistent framing and "
-    "generous white space around the object across all images."
+    "proportions, texture, perspective, or condition. Adjust lighting, "
+    "exposure, and tonal balance naturally to match the new environment while "
+    "preserving the product's original hue, saturation, and color identity. "
+    "Do not make the product more gray, muted, warm, or cool than it appears "
+    "in the original image.\n"
+    "Add one natural floor shadow that originates from the object's "
+    "contact points and extends diagonally toward the back-left of the image, "
+    "matching illumination from the front-right. The shadow should be "
+    "softly blurred, fading naturally with distance. Do not place "
+    "the shadow directly underneath the object or evenly around it.\n"
+    "Make sure the product is centered, and scale the product so that its "
+    "longest dimension occupies approximately 75% of the frame. Maintain "
+    "consistent framing across all images."
 )
 
 # ── Cover mode: category classification + scene composition ────────────────────
@@ -276,14 +283,14 @@ def _humanize(raw: str) -> str:
     """
     m = raw.lower()
     if "429" in raw or "rate" in m or "quota" in m or "insufficient" in m or "exhausted" in m:
-        return "Processing quota is used up — wait a minute and retry, or contact the admin."
+        return "Processing quota is used up. Wait a minute and retry, or contact the admin."
     if "401" in raw or "api key" in m or "auth" in m:
-        return "API key problem — contact the admin."
+        return "API key problem. Contact the admin."
     if "moderation" in m or "safety" in m or "content policy" in m or "rejected" in m:
-        return "The image was declined by the processor — try a different photo."
+        return "The image was declined by the processor. Try a different photo."
     if "timeout" in m or "timed out" in m or "connect" in m or "network" in m or "unavailable" in m:
-        return "Network hiccup while processing — please retry this photo."
-    return "Processing failed — please retry this photo."
+        return "Network hiccup while processing. Please retry this photo."
+    return "Processing failed. Please retry this photo."
 
 
 def _decode(resp) -> Image.Image | None:

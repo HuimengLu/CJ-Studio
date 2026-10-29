@@ -930,7 +930,12 @@ def compose(result: Image.Image, subject_rgba, ratio: str,
 
 # Per-ratio zoom applied to the model frame before centring on the backdrop.
 # 4:5 enlarges 20% so the product fills that taller ratio; others contain-fit.
-_TESTING2_ZOOM = {"4:5": 1.2}
+# 1:1 gets 1.25, not the 4/3 that would exactly match 4:3's product size: at
+# 4/3 a nominal 75%-of-frame-width product spans the full canvas width with
+# zero margin, and the prompt's "approximately 75%" variance would clip wide
+# items (dressers, sofas) at the edges. 1.25 keeps ~6% of safety margin.
+# Mirrored by contentZoom in frontend/app/page.tsx — keep the two in sync.
+_TESTING2_ZOOM = {"1:1": 1.25, "4:5": 1.2}
 
 # Cover mode: category → scene background in static/cover/. Explicit mapping —
 # the filenames don't follow a strict "<category> Background" rule (Building
@@ -990,9 +995,11 @@ def make_listing_openai(pil_img: Image.Image):
     """Testing-2 builder: OpenAI white-bg + studio shadow → full frame for multiply.
 
     Flow: gpt-image-2 remove-bg/shadow → optional ESRGAN upscale. The whole
-    model output is kept — no crop, no exposure/contrast/white edits — so its
-    centred composition and balanced whitespace survive intact; compose_testing2
-    contain-fits and centres it on the backdrop. Returns (frame_rgb, warn), an
+    model output is stored raw — no crop, no colour edits here — so its
+    centred composition and balanced whitespace survive intact;
+    compose_testing2 normalises the plate's white point (at compose time so
+    the stored plate stays pristine) and contain-fits it onto the backdrop.
+    Returns (frame_rgb, warn), an
     HxWx3 uint8 white-background image, or (None, warn) on failure.
     """
     from . import openai_engine
@@ -1014,17 +1021,22 @@ def make_listing_openai(pil_img: Image.Image):
 
 
 def compose_testing2(plate: np.ndarray, ratio: str) -> Image.Image:
-    """Multiply the full gpt-image-2 frame onto the CJ product backdrop.
+    """Blend the full gpt-image-2 frame onto the CJ product backdrop.
 
     The whole model frame is contain-fitted (all of its content stays visible)
-    and centred on the backdrop, then multiply-blended — pure-white areas leave
-    the backdrop untouched, only the product and its shadow darken it. Because
+    and centred on the backdrop. Whites and the soft shadow multiply, so
+    pure-white areas leave the backdrop untouched and the shadow darkens it;
+    the product body keeps its own colour instead of being multiplied by the
+    (~82% bright, warm) backdrop — see _protected_multiply. Because
     the model already centres the product with balanced whitespace, centring the
     frame keeps the product centred while preserving its full composition.
 
-    4:5 gets a 20% enlargement (`_TESTING2_ZOOM`) so the product isn't dwarfed
-    by that ratio's extra height; the enlarged frame is centred with the
-    overflow clipped to the canvas.
+    1:1 and 4:5 get a per-ratio enlargement (`_TESTING2_ZOOM`) so the product
+    isn't dwarfed relative to the wider 4:3 canvas; the enlarged frame is
+    centred with the overflow clipped to the canvas. 1.25 on 1:1 keeps ~2.5%
+    frame margin outside the product's 75% span — the product never clips,
+    though the longest shadow tips may. Mirror any change in the frontend
+    contentZoom (page.tsx).
     """
     W, H = _ratio_dims(ratio)
     bg = load_product_bg()
@@ -1032,6 +1044,13 @@ def compose_testing2(plate: np.ndarray, ratio: str) -> Image.Image:
         canvas = np.array(ImageOps.fit(bg, (W, H), Image.LANCZOS))
     else:
         canvas = np.full((H, W, 3), [253, 253, 242], dtype=np.uint8)  # #FDFDF2
+
+    # The model's "white" is not 255 (measured ~231), so an uncorrected plate
+    # shows its frame as a grey rectangle on the backdrop. Replaces the earlier
+    # +10% brightness / +15% contrast grade: PIL's Contrast pivots on the image
+    # MEAN, which on a mostly-white plate is ~250, so it pushed the whole
+    # product darker. The stored plate stays raw; covers never pass through here.
+    plate = _normalize_white(plate)
 
     ph, pw = plate.shape[:2]
     s = min(W / pw, H / ph) * _TESTING2_ZOOM.get(ratio, 1.0)   # contain-fit × per-ratio zoom
@@ -1046,9 +1065,42 @@ def compose_testing2(plate: np.ndarray, ratio: str) -> Image.Image:
     py0, px0 = cy0 - oy, cx0 - ox
     top = plate[py0:py0 + (cy1 - cy0), px0:px0 + (cx1 - cx0)].astype(np.float32)
     base = canvas[cy0:cy1, cx0:cx1].astype(np.float32)
-    canvas[cy0:cy1, cx0:cx1] = np.clip(base * top / 255.0, 0, 255).astype(np.uint8)
+    canvas[cy0:cy1, cx0:cx1] = _protected_multiply(base, top)
 
     return Image.fromarray(canvas)
+
+
+def _normalize_white(plate: np.ndarray) -> np.ndarray:
+    """Scale each channel so the plate's own white lands on 255.
+
+    The white point is the per-channel median of the four corner patches,
+    which the prompt's generous whitespace keeps clear of the product. This
+    also neutralises a faint cast in the white. The gain is clamped so a
+    product that does reach a corner can't blow the image out.
+    """
+    h, w = plate.shape[:2]
+    k = max(8, min(h, w) // 32)
+    corners = np.concatenate([plate[:k, :k], plate[:k, -k:],
+                              plate[-k:, :k], plate[-k:, -k:]]).reshape(-1, 3)
+    wp = np.median(corners, axis=0).astype(np.float32)
+    gain = np.clip(255.0 / np.maximum(wp, 1.0), 1.0, 1.2)
+    return np.clip(plate.astype(np.float32) * gain, 0, 255).astype(np.uint8)
+
+
+def _protected_multiply(base: np.ndarray, top: np.ndarray,
+                        lo: float = 150.0, hi: float = 235.0) -> np.ndarray:
+    """Multiply `top` onto `base`, fading the multiply out on dark pixels.
+
+    Luminance ≥ hi (white, soft shadow edges) multiplies fully, so the
+    backdrop texture and shadow read as before; ≤ lo (the product body)
+    keeps the plate's own colour; smoothstep in between. Very light products
+    fall mostly in the multiply band and look like a plain multiply.
+    """
+    L = top.mean(axis=2, keepdims=True)
+    t = np.clip((L - lo) / (hi - lo), 0.0, 1.0)
+    t = t * t * (3.0 - 2.0 * t)
+    factor = 1.0 - t + t * (base / 255.0)
+    return np.clip(top * factor, 0, 255).astype(np.uint8)
 
 
 def draw_dimensions(img: Image.Image, dims: list[dict]) -> Image.Image:
